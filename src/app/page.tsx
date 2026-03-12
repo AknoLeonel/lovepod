@@ -1,65 +1,101 @@
-import Image from "next/image";
+import { supabase } from '@/lib/supabase';
+import Link from 'next/link';
+import { Metadata } from 'next';
 
-export default function Home() {
+// Otimização de SEO
+export const metadata: Metadata = {
+  title: 'LOVEPOD | O Melhor Pod Descartável da Região',
+  description: 'Escolha sua cidade e receba seu pod descartável rapidinho! Atendemos Formosa, Barreiras e Corrente.',
+  keywords: ['pod descartável', 'vape', 'comprar pod', 'ignite', 'elfbar', 'lovepod', 'formosa', 'barreiras', 'corrente'],
+  openGraph: {
+    title: 'LOVEPOD | Escolha sua Cidade',
+    description: 'Entrega rápida de pods descartáveis. Selecione sua cidade para ver o estoque disponível.',
+    type: 'website',
+    locale: 'pt_BR',
+  },
+};
+
+// Cache (60 segundos)
+export const revalidate = 60; 
+
+export default async function Home() {
+  const { data: cidades, error } = await supabase
+    .from('cidades')
+    .select('*')
+    .order('nome');
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <main className="min-h-screen relative overflow-hidden bg-[#030303] text-zinc-100 flex flex-col items-center justify-center p-6 sm:p-12 selection:bg-pink-500 selection:text-white">
+      
+      {/* Efeitos de Luz de Fundo (Ambient Glow) */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] sm:w-[800px] h-[400px] bg-pink-600/10 blur-[120px] rounded-full pointer-events-none" />
+      <div className="absolute bottom-0 right-0 w-[400px] h-[400px] bg-rose-600/5 blur-[100px] rounded-full pointer-events-none" />
+
+      {/* Container Principal */}
+      <div className="w-full max-w-md relative z-10 flex flex-col items-center text-center space-y-12 animate-in fade-in slide-in-from-bottom-8 duration-1000">
+        
+        {/* Logo / Tipografia Premium */}
+        <header className="space-y-6">
+          <div className="inline-block border border-pink-500/20 bg-pink-500/5 px-4 py-1.5 rounded-full mb-4">
+            <span className="text-[10px] uppercase tracking-[0.3em] font-bold text-pink-400">Entrega Expressa</span>
+          </div>
+          <h1 className="text-6xl sm:text-7xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-b from-white via-zinc-200 to-zinc-600 drop-shadow-[0_0_15px_rgba(255,255,255,0.1)]">
+            LOVE<span className="text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-rose-400">POD</span>
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+          <p className="text-zinc-400 text-sm sm:text-base font-medium max-w-[280px] mx-auto leading-relaxed">
+            Selecione sua localização para acessar o catálogo exclusivo.
           </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+        </header>
+
+        {/* Lista de Cidades (Cartões VIP) */}
+        <nav className="w-full flex flex-col gap-4">
+          {error ? (
+            <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-400 text-sm backdrop-blur-md">
+              <p>Erro ao carregar sistema. Tente novamente.</p>
+            </div>
+          ) : cidades?.length === 0 ? (
+            <div className="p-4 bg-zinc-900/40 border border-zinc-800 rounded-2xl text-zinc-500 text-sm backdrop-blur-md">
+              <p>Nenhuma cidade disponível.</p>
+            </div>
+          ) : (
+            cidades?.map((cidade) => (
+              <Link 
+                key={cidade.id} 
+                href={`/catalogo/${cidade.id}`}
+                className="group relative w-full flex items-center justify-between px-6 py-5 sm:py-6 bg-zinc-900/40 backdrop-blur-md border border-white/5 hover:border-pink-500/30 rounded-3xl transition-all duration-500 hover:shadow-[0_0_30px_rgba(236,72,153,0.15)] overflow-hidden active:scale-[0.98]"
+              >
+                {/* Efeito de hover interno */}
+                <div className="absolute inset-0 bg-gradient-to-r from-pink-500/0 via-pink-500/5 to-pink-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+                
+                <span className="relative text-lg sm:text-xl font-bold text-zinc-300 group-hover:text-white transition-colors tracking-wide">
+                  {cidade.nome}
+                </span>
+                
+                {/* Botão circular de seta */}
+                <div className="relative flex items-center justify-center w-10 h-10 rounded-full bg-black/50 border border-white/5 group-hover:bg-pink-500 group-hover:border-pink-400 group-hover:text-white text-zinc-500 transition-all duration-300">
+                  <svg 
+                    className="w-5 h-5 transform group-hover:translate-x-0.5 transition-transform" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                  </svg>
+                </div>
+              </Link>
+            ))
+          )}
+        </nav>
+
+        {/* Footer Minimalista */}
+        <footer className="pt-10 w-full flex flex-col items-center gap-3 opacity-60 hover:opacity-100 transition-opacity duration-300">
+          <div className="h-px bg-gradient-to-r from-transparent via-zinc-800 to-transparent w-3/4" />
+          <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold flex items-center gap-2">
+            <span>🔞</span> Proibido para menores de 18 anos
+          </p>
+        </footer>
+        
+      </div>
+    </main>
   );
 }
