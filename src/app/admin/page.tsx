@@ -4,55 +4,51 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import Link from 'next/link';
 
-// === SENHA DE ACESSO AO PAINEL ===
 const SENHA_ADMIN = "lovepod2026"; 
 
 export default function AdminDashboard() {
-  // ==========================================
-  // ESTADOS GERAIS E AUTENTICAÇÃO
-  // ==========================================
   const [isAutenticado, setIsAutenticado] = useState(false);
   const [senhaDigitada, setSenhaDigitada] = useState("");
   const [erroSenha, setErroSenha] = useState(false);
   const [verificandoSessao, setVerificandoSessao] = useState(true);
   const [loading, setLoading] = useState(true);
 
-  // Controle de Abas (Navegação do Painel)
-  const [abaAtiva, setAbaAtiva] = useState<'estoque' | 'produtos' | 'sabores' | 'cidades'>('estoque');
+  const [abaAtiva, setAbaAtiva] = useState<'estoque' | 'produtos' | 'sabores' | 'cidades' | 'importacao'>('estoque');
 
-  // Dados do Banco
   const [estoque, setEstoque] = useState<any[]>([]);
   const [cidadesList, setCidadesList] = useState<any[]>([]);
   const [produtosList, setProdutosList] = useState<any[]>([]);
   const [saboresList, setSaboresList] = useState<any[]>([]);
 
-  // ==========================================
-  // ESTADOS DOS MODAIS (Janelas de Ação)
-  // ==========================================
-  // 1. Estoque
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [itemEditando, setItemEditando] = useState<any>(null);
   const [novaQuantidade, setNovaQuantidade] = useState<number>(0);
+  
   const [isAddEstoqueModalOpen, setIsAddEstoqueModalOpen] = useState(false);
   const [formEstoque, setFormEstoque] = useState({ cidade_id: '', produto_id: '', sabor_id: '', quantidade: 1 });
 
-  // 2. Produtos
   const [isAddProdutoModalOpen, setIsAddProdutoModalOpen] = useState(false);
   const [formProduto, setFormProduto] = useState({ nome: '', descricao: '', preco: '' });
 
-  // 3. Sabores
   const [isAddSaborModalOpen, setIsAddSaborModalOpen] = useState(false);
   const [formSabor, setFormSabor] = useState({ produto_id: '', nome: '' });
 
-  // 4. Cidades
   const [isAddCidadeModalOpen, setIsAddCidadeModalOpen] = useState(false);
   const [formCidade, setFormCidade] = useState({ nome: '' });
 
+  // NOVO: Estados do Modal de Imagem
+  const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+  const [produtoImage, setProdutoImage] = useState<any>(null);
+  const [imageUrl, setImageUrl] = useState("");
+
   const [salvando, setSalvando] = useState(false);
 
-  // ==========================================
-  // EFEITOS E CARREGAMENTO DE DADOS
-  // ==========================================
+  // Estados da Importação
+  const [textImport, setTextImport] = useState('');
+  const [cityImport, setCityImport] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importLogs, setImportLogs] = useState<string[]>([]);
+
   useEffect(() => {
     const auth = sessionStorage.getItem('lovepod_admin_auth');
     if (auth === 'true') {
@@ -82,12 +78,7 @@ export default function AdminDashboard() {
 
   const carregarDados = async () => {
     setLoading(true);
-    
-    const { data: estq } = await supabase
-      .from('estoque')
-      .select(`id, quantidade, cidade_id, produto_id, sabor_id, cidade:cidades(nome), produto:produtos(nome), sabor:sabores(nome)`)
-      .order('cidade_id');
-      
+    const { data: estq } = await supabase.from('estoque').select(`id, quantidade, cidade_id, produto_id, sabor_id, cidade:cidades(nome), produto:produtos(nome), sabor:sabores(nome)`).order('cidade_id');
     const [resCidades, resProdutos, resSabores] = await Promise.all([
       supabase.from('cidades').select('*').order('nome'),
       supabase.from('produtos').select('*').order('nome'),
@@ -98,357 +89,521 @@ export default function AdminDashboard() {
     if (resCidades.data) setCidadesList(resCidades.data);
     if (resProdutos.data) setProdutosList(resProdutos.data);
     if (resSabores.data) setSaboresList(resSabores.data);
-
     setLoading(false);
   };
 
-  // ==========================================
-  // FUNÇÕES DE SALVAMENTO (CRUD)
-  // ==========================================
-
-  // -- Salvar Edição de Estoque --
   const salvarEdicaoEstoque = async () => {
     setSalvando(true);
     const { error } = await supabase.from('estoque').update({ quantidade: novaQuantidade }).eq('id', itemEditando.id);
-    if (!error) { setIsEditModalOpen(false); carregarDados(); } 
-    else alert("Erro: " + error.message);
+    if (!error) { setIsEditModalOpen(false); carregarDados(); } else alert("Erro: " + error.message);
     setSalvando(false);
   };
 
-  // -- Adicionar Novo Estoque --
   const salvarNovoEstoque = async () => {
     if (!formEstoque.cidade_id || !formEstoque.produto_id || !formEstoque.sabor_id) return alert("Preencha todos os campos.");
     setSalvando(true);
     const existente = estoque.find((item) => item.cidade_id.toString() === formEstoque.cidade_id && item.produto_id.toString() === formEstoque.produto_id && item.sabor_id.toString() === formEstoque.sabor_id);
-
     if (existente) {
-      const { error } = await supabase.from('estoque').update({ quantidade: existente.quantidade + formEstoque.quantidade }).eq('id', existente.id);
-      if (error) alert("Erro: " + error.message);
+      await supabase.from('estoque').update({ quantidade: existente.quantidade + formEstoque.quantidade }).eq('id', existente.id);
     } else {
-      const { error } = await supabase.from('estoque').insert([{ cidade_id: parseInt(formEstoque.cidade_id), produto_id: parseInt(formEstoque.produto_id), sabor_id: parseInt(formEstoque.sabor_id), quantidade: formEstoque.quantidade }]);
-      if (error) alert("Erro: " + error.message);
+      await supabase.from('estoque').insert([{ cidade_id: parseInt(formEstoque.cidade_id), produto_id: parseInt(formEstoque.produto_id), sabor_id: parseInt(formEstoque.sabor_id), quantidade: formEstoque.quantidade }]);
     }
     setSalvando(false); setIsAddEstoqueModalOpen(false); carregarDados(); 
   };
 
-  // -- Criar Novo Produto do Zero --
   const salvarNovoProduto = async () => {
     if (!formProduto.nome || !formProduto.preco) return alert("Nome e Preço são obrigatórios.");
     setSalvando(true);
     const precoFormatado = parseFloat(formProduto.preco.replace(',', '.'));
     const { error } = await supabase.from('produtos').insert([{ nome: formProduto.nome, descricao: formProduto.descricao, preco: precoFormatado }]);
-    if (!error) { setIsAddProdutoModalOpen(false); setFormProduto({nome: '', descricao: '', preco: ''}); carregarDados(); } 
-    else alert("Erro: " + error.message);
+    if (!error) { setIsAddProdutoModalOpen(false); setFormProduto({nome: '', descricao: '', preco: ''}); carregarDados(); } else alert("Erro: " + error.message);
     setSalvando(false);
   };
 
-  // -- Criar Novo Sabor --
   const salvarNovoSabor = async () => {
     if (!formSabor.nome || !formSabor.produto_id) return alert("Selecione um produto e digite o nome do sabor.");
     setSalvando(true);
     const { error } = await supabase.from('sabores').insert([{ nome: formSabor.nome, produto_id: parseInt(formSabor.produto_id) }]);
-    if (!error) { setIsAddSaborModalOpen(false); setFormSabor({produto_id: '', nome: ''}); carregarDados(); } 
-    else alert("Erro: " + error.message);
+    if (!error) { setIsAddSaborModalOpen(false); setFormSabor({produto_id: '', nome: ''}); carregarDados(); } else alert("Erro: " + error.message);
     setSalvando(false);
   };
 
-  // -- Criar Nova Cidade --
   const salvarNovaCidade = async () => {
     if (!formCidade.nome) return alert("Digite o nome da cidade.");
     setSalvando(true);
     const { error } = await supabase.from('cidades').insert([{ nome: formCidade.nome }]);
-    if (!error) { setIsAddCidadeModalOpen(false); setFormCidade({nome: ''}); carregarDados(); } 
-    else alert("Erro: " + error.message);
+    if (!error) { setIsAddCidadeModalOpen(false); setFormCidade({nome: ''}); carregarDados(); } else alert("Erro: " + error.message);
     setSalvando(false);
+  };
+
+  // NOVO: Função para salvar a imagem do produto
+  const salvarImagemProduto = async () => {
+    setSalvando(true);
+    // Certifique-se de ter a coluna "imagem_url" na sua tabela "produtos" no Supabase!
+    const { error } = await supabase.from('produtos').update({ imagem_url: imageUrl }).eq('id', produtoImage.id);
+    if (!error) { 
+      setIsImageModalOpen(false); 
+      setImageUrl(""); 
+      carregarDados(); 
+    } else {
+      alert("Erro ao salvar imagem: " + error.message);
+    }
+    setSalvando(false);
+  };
+
+  // Funções do Scanner WhatsApp
+  const addLog = (msg: string) => setImportLogs(prev => [...prev, msg]);
+
+  const processarLoteWhatsApp = async () => {
+    if (!cityImport) return alert("Por favor, selecione a cidade onde esse estoque chegou!");
+    if (!textImport.trim()) return alert("Cole a mensagem do WhatsApp na caixa de texto!");
+
+    setIsImporting(true);
+    setImportLogs(["🚀 Iniciando leitura do lote..."]);
+
+    const linhas = textImport.split('\n');
+    let produtoAtualId = null;
+    let produtoAtualNome = "";
+    let itensProcessados = 0;
+
+    for (const linha of linhas) {
+      const txt = linha.trim();
+      if (!txt) continue;
+
+      if (txt.includes('✅')) {
+        const partes = txt.split('✅');
+        produtoAtualNome = partes[0].trim();
+        const precoMatch = txt.match(/R\$\s*:\s*([\d,]+)/i) || txt.match(/R\$\s*([\d,]+)/i) || txt.match(/([\d,]+)/);
+        const precoAtual = precoMatch ? parseFloat(precoMatch[1].replace(',', '.')) : 0;
+
+        addLog(`📦 Marca: ${produtoAtualNome}`);
+        const { data: pData } = await supabase.from('produtos').select('id').ilike('nome', produtoAtualNome).limit(1);
+        
+        if (pData && pData.length > 0) {
+          produtoAtualId = pData[0].id;
+        } else {
+          const { data: newProd } = await supabase.from('produtos').insert([{ nome: produtoAtualNome, preco: precoAtual, descricao: 'Importação Rápida' }]).select().single();
+          produtoAtualId = newProd?.id;
+        }
+        continue;
+      }
+
+      const matchSabor = txt.match(/^(\d+)\s*[-–]\s*(.+)$/);
+      if (matchSabor && produtoAtualId) {
+        const quantidade = parseInt(matchSabor[1]);
+        const saborNome = matchSabor[2].trim();
+
+        let saborId = null;
+        const { data: sData } = await supabase.from('sabores').select('id').eq('produto_id', produtoAtualId).ilike('nome', saborNome).limit(1);
+        
+        if (sData && sData.length > 0) {
+          saborId = sData[0].id;
+        } else {
+          const { data: newSab } = await supabase.from('sabores').insert([{ nome: saborNome, produto_id: produtoAtualId }]).select().single();
+          saborId = newSab?.id;
+        }
+
+        if (saborId) {
+          const { data: eData } = await supabase.from('estoque').select('*').eq('cidade_id', parseInt(cityImport)).eq('produto_id', produtoAtualId).eq('sabor_id', saborId).limit(1);
+          if (eData && eData.length > 0) {
+            await supabase.from('estoque').update({ quantidade: eData[0].quantidade + quantidade }).eq('id', eData[0].id);
+          } else {
+            await supabase.from('estoque').insert([{ cidade_id: parseInt(cityImport), produto_id: produtoAtualId, sabor_id: saborId, quantidade: quantidade }]);
+          }
+          addLog(`   ✅ ${quantidade}x ${saborNome} guardado`);
+          itensProcessados++;
+        }
+      }
+    }
+    addLog(`🎉 PRONTO! ${itensProcessados} lotes foram guardados!`);
+    setIsImporting(false); setTextImport(''); carregarDados(); 
   };
 
 
   // ==========================================
-  // RENDERIZAÇÃO DAS TELAS DE BLOQUEIO
+  // AGRUPAMENTO DE DADOS 
   // ==========================================
-  if (verificandoSessao) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-pink-500 font-bold uppercase tracking-widest animate-pulse">Carregando...</div>;
+  
+  const estoqueAgrupadoArray = Object.values(
+    estoque.reduce((acc: any, item: any) => {
+      const key = `${item.cidade_id}-${item.produto_id}`;
+      if (!acc[key]) {
+        acc[key] = {
+          cidade: item.cidade,
+          produto: item.produto,
+          cidade_id: item.cidade_id,
+          produto_id: item.produto_id,
+          total: 0,
+          variacoes: []
+        };
+      }
+      acc[key].total += item.quantidade;
+      acc[key].variacoes.push(item);
+      return acc;
+    }, {})
+  ).sort((a: any, b: any) => a.produto?.nome.localeCompare(b.produto?.nome));
+
+  const saboresAgrupadosArray = Object.values(
+    saboresList.reduce((acc: any, s: any) => {
+      if (!acc[s.produto_id]) {
+        acc[s.produto_id] = { id: s.produto_id, produtoNome: s.produto?.nome, sabores: [] };
+      }
+      acc[s.produto_id].sabores.push(s);
+      return acc;
+    }, {})
+  ).sort((a: any, b: any) => a.produtoNome?.localeCompare(b.produtoNome));
+
+
+  // ==========================================
+  // RENDERIZAÇÃO
+  // ==========================================
+  if (verificandoSessao) return <div className="min-h-screen bg-[#030303] flex items-center justify-center"><div className="w-12 h-12 border-4 border-pink-500/20 border-t-pink-500 rounded-full animate-spin" /></div>;
 
   if (!isAutenticado) {
     return (
-      <div className="min-h-screen bg-[#050505] flex items-center justify-center p-4 selection:bg-pink-500">
-        <div className="bg-zinc-900/80 border border-zinc-800 p-8 rounded-3xl w-full max-w-sm shadow-2xl backdrop-blur-md animate-in fade-in zoom-in duration-500">
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-rose-400 tracking-tighter">LOVEPOD</h1>
-            <p className="text-zinc-500 text-xs uppercase tracking-[0.3em] mt-2 font-bold">Acesso Restrito</p>
+      <div className="min-h-screen bg-[#030303] flex items-center justify-center p-6 selection:bg-pink-500 relative overflow-hidden">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-pink-600/10 blur-[120px] rounded-full pointer-events-none" />
+        <div className="bg-zinc-900/40 border border-white/5 p-8 sm:p-10 rounded-[2rem] w-full max-w-md shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-700 relative z-10">
+          <div className="text-center mb-10">
+            <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-rose-400 tracking-tighter drop-shadow-md">LOVEPOD</h1>
+            <p className="text-zinc-500 text-[10px] uppercase tracking-[0.4em] mt-3 font-bold">Workspace Restrito</p>
           </div>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <input type="password" placeholder="Digite a senha admin..." value={senhaDigitada} onChange={(e) => setSenhaDigitada(e.target.value)} className={`w-full bg-zinc-950 border ${erroSenha ? 'border-red-500' : 'border-zinc-800'} rounded-xl h-14 px-4 text-center text-white focus:outline-none focus:border-pink-500`} />
-              {erroSenha && <p className="text-red-500 text-xs text-center mt-2 font-bold animate-bounce">Senha incorreta!</p>}
-            </div>
-            <button type="submit" className="w-full bg-pink-600 hover:bg-pink-500 text-white font-black uppercase tracking-widest h-14 rounded-xl transition-all active:scale-95 shadow-[0_0_20px_rgba(236,72,153,0.2)]">Entrar no Painel</button>
-            <div className="text-center pt-4"><Link href="/" className="text-zinc-500 hover:text-white text-xs transition-colors">← Voltar para a loja</Link></div>
+          <form onSubmit={handleLogin} className="space-y-5">
+            <div><input type="password" placeholder="Digite a chave de acesso" value={senhaDigitada} onChange={(e) => setSenhaDigitada(e.target.value)} className={`w-full bg-black/50 border ${erroSenha ? 'border-red-500 focus:border-red-500' : 'border-white/10 focus:border-pink-500'} rounded-2xl h-14 px-6 text-center text-white placeholder:text-zinc-600 focus:outline-none transition-all shadow-inner`} /></div>
+            <button type="submit" className="w-full bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 text-white font-black uppercase tracking-widest h-14 rounded-2xl transition-all active:scale-95 shadow-[0_0_30px_rgba(236,72,153,0.3)]">Autorizar Acesso</button>
+            <div className="text-center pt-4"><Link href="/" className="text-zinc-500 hover:text-pink-400 text-xs font-semibold transition-colors flex items-center justify-center gap-2"><span>←</span> Retornar à Loja</Link></div>
           </form>
         </div>
       </div>
     );
   }
 
-  // ==========================================
-  // RENDERIZAÇÃO DO PAINEL ADMIN COMPLETO
-  // ==========================================
   return (
-    <div className="min-h-screen bg-zinc-950 text-white p-4 sm:p-8 selection:bg-pink-500 relative pb-20">
-      <div className="max-w-6xl mx-auto space-y-6">
-        
-        {/* CABEÇALHO SUPERIOR */}
-        <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-zinc-800 pb-6 pt-4">
-          <div>
-            <h1 className="text-3xl font-black text-pink-500 tracking-tight uppercase">Lovepod Admin</h1>
-            <p className="text-zinc-400 text-sm mt-1">Gestão central do sistema.</p>
-          </div>
-          <div className="flex gap-3 w-full sm:w-auto">
-            <Link href="/" target="_blank" className="px-4 py-2 text-sm bg-zinc-900 border border-zinc-800 hover:border-zinc-700 rounded-lg transition-colors flex-1 sm:flex-none text-center font-medium">Ver Loja</Link>
-            <button onClick={handleLogout} className="px-4 py-2 text-sm bg-red-500/10 text-red-500 hover:bg-red-500/20 font-bold rounded-lg transition-all active:scale-95 flex-none" title="Sair do Painel">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-            </button>
-          </div>
-        </header>
+    <div className="min-h-screen bg-[#030303] text-zinc-100 selection:bg-pink-500 pb-24 font-sans">
+      <header className="sticky top-0 z-40 bg-[#030303]/80 backdrop-blur-xl border-b border-white/5 shadow-sm">
+        <div className="max-w-6xl mx-auto px-4 sm:px-8 py-4 flex justify-between items-center">
+          <div className="flex flex-col"><h1 className="text-xl sm:text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-rose-400 tracking-tight uppercase">Dashboard</h1><span className="text-[9px] sm:text-xs text-zinc-500 font-bold uppercase tracking-widest mt-0.5">Control Center</span></div>
+          <div className="flex items-center gap-2 sm:gap-4"><Link href="/" target="_blank" className="hidden sm:flex px-5 py-2.5 text-xs bg-zinc-900 border border-white/5 hover:border-pink-500/50 rounded-xl transition-all font-bold">Ver Loja</Link><button onClick={handleLogout} className="p-2.5 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-all active:scale-95"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg></button></div>
+        </div>
 
-        {/* MENU DE ABAS (Navegação Interna) */}
-        <nav className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
+        <nav className="max-w-6xl mx-auto px-4 sm:px-8 flex gap-3 overflow-x-auto pb-4 pt-2 [&::-webkit-scrollbar]:hidden snap-x">
           {[
-            { id: 'estoque', label: '📦 Controle de Estoque' },
-            { id: 'produtos', label: '🏷️ Marcas & Produtos' },
+            { id: 'importacao', label: '🚀 Importação Inteligente' },
+            { id: 'estoque', label: '📦 Estoque' },
+            { id: 'produtos', label: '🏷️ Produtos' },
             { id: 'sabores', label: '💧 Sabores' },
             { id: 'cidades', label: '🏙️ Cidades' }
           ].map((aba) => (
-            <button
-              key={aba.id}
-              onClick={() => setAbaAtiva(aba.id as any)}
-              className={`px-5 py-3 rounded-xl font-bold text-sm whitespace-nowrap transition-all ${
-                abaAtiva === aba.id 
-                  ? 'bg-pink-600 text-white shadow-[0_0_15px_rgba(236,72,153,0.3)]' 
-                  : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-white'
-              }`}
-            >
+            <button key={aba.id} onClick={() => setAbaAtiva(aba.id as any)} className={`snap-start shrink-0 px-6 py-3 rounded-2xl font-bold text-xs sm:text-sm transition-all duration-300 ${abaAtiva === aba.id ? 'bg-pink-600 text-white shadow-[0_4px_20px_rgba(236,72,153,0.4)] scale-100' : 'bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 hover:text-white border border-white/5 scale-95 hover:scale-100'}`}>
               {aba.label}
             </button>
           ))}
         </nav>
+      </header>
 
-        {/* CONTEÚDO DINÂMICO BASEADO NA ABA */}
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl animate-in fade-in duration-300">
-          
-          {loading ? (
-             <div className="p-12 text-center text-pink-500 animate-pulse font-bold tracking-widest uppercase text-sm">Atualizando dados...</div>
-          ) : (
-            <>
-              {/* ABA 1: ESTOQUE */}
-              {abaAtiva === 'estoque' && (
-                <div>
-                  <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/80">
-                    <h2 className="font-bold text-zinc-300">Inventário Atual</h2>
-                    <button onClick={() => {setFormEstoque({cidade_id: '', produto_id: '', sabor_id: '', quantidade: 1}); setIsAddEstoqueModalOpen(true)}} className="bg-pink-600 hover:bg-pink-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors">+ Dar Entrada</button>
+      <main className="max-w-6xl mx-auto px-4 sm:px-8 mt-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-4"><div className="w-8 h-8 border-4 border-pink-500/20 border-t-pink-500 rounded-full animate-spin" /><span className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Sincronizando...</span></div>
+        ) : (
+          <>
+            {abaAtiva === 'importacao' && (
+              <div className="space-y-6">
+                <div><h2 className="text-2xl font-black text-white">Scanner de Lote</h2><p className="text-zinc-400 text-sm mt-1">Cole a lista do WhatsApp. O sistema cria e atualiza sozinho.</p></div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-zinc-900/40 border border-white/5 p-6 rounded-3xl space-y-6">
+                    <div className="space-y-2"><label className="text-xs font-bold text-zinc-400 uppercase tracking-widest">1. Cidade</label><select className="w-full bg-black/50 border border-white/10 rounded-2xl h-14 px-5 font-semibold text-white focus:border-pink-500 outline-none" value={cityImport} onChange={(e) => setCityImport(e.target.value)}><option value="">-- Escolha --</option>{cidadesList.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}</select></div>
+                    <div className="space-y-2"><label className="text-xs font-bold text-zinc-400 uppercase tracking-widest">2. Texto do WhatsApp</label><textarea className="w-full bg-black/50 border border-white/10 rounded-2xl p-5 text-sm font-mono text-zinc-300 focus:border-pink-500 outline-none custom-scrollbar" rows={10} value={textImport} onChange={(e) => setTextImport(e.target.value)} /></div>
+                    <button onClick={processarLoteWhatsApp} disabled={isImporting} className="w-full bg-gradient-to-r from-pink-600 to-rose-500 text-white font-black uppercase tracking-widest h-14 rounded-2xl transition-all active:scale-95 disabled:opacity-50">{isImporting ? 'Lendo...' : 'Processar Estoque'}</button>
                   </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm whitespace-nowrap">
-                      <thead className="bg-zinc-950 text-zinc-400 uppercase font-bold text-[10px] tracking-wider">
-                        <tr><th className="px-6 py-4">Cidade</th><th className="px-6 py-4">Produto</th><th className="px-6 py-4">Sabor</th><th className="px-6 py-4">Qtd.</th><th className="px-6 py-4 text-right">Ação</th></tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-800/50">
-                        {estoque.map((item: any) => (
-                          <tr key={item.id} className="hover:bg-zinc-800/30">
-                            <td className="px-6 py-4 text-zinc-300">{item.cidade?.nome}</td>
-                            <td className="px-6 py-4 font-bold text-pink-400">{item.produto?.nome}</td>
-                            <td className="px-6 py-4 text-zinc-300">{item.sabor?.nome}</td>
-                            <td className="px-6 py-4"><span className={`px-2 py-1 rounded text-xs font-bold ${item.quantidade > 3 ? 'bg-green-500/10 text-green-400' : item.quantidade > 0 ? 'bg-orange-500/10 text-orange-400' : 'bg-red-500/10 text-red-400'}`}>{item.quantidade} un.</span></td>
-                            <td className="px-6 py-4 text-right"><button onClick={() => {setItemEditando(item); setNovaQuantidade(item.quantidade); setIsEditModalOpen(true)}} className="text-zinc-400 hover:text-white px-3 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-xs font-bold">Ajustar</button></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div className="bg-[#0a0a0a] border border-white/5 p-6 rounded-3xl flex flex-col h-[500px]">
+                    <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-4 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /> Terminal</h3>
+                    <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar font-mono text-[11px] sm:text-xs text-zinc-400 bg-black/50 p-4 rounded-2xl border border-white/5">{importLogs.map((log, idx) => (<div key={idx} className={`${log.includes('PRONTO') ? 'text-green-400 font-bold text-sm pt-4' : log.includes('NOVO') ? 'text-pink-400' : ''}`}>{log}</div>))}</div>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* ABA 2: PRODUTOS */}
-              {abaAtiva === 'produtos' && (
-                <div>
-                  <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/80">
-                    <h2 className="font-bold text-zinc-300">Catálogo de Produtos</h2>
-                    <button onClick={() => {setFormProduto({nome: '', descricao: '', preco: ''}); setIsAddProdutoModalOpen(true)}} className="bg-pink-600 hover:bg-pink-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors">+ Novo Produto</button>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm whitespace-nowrap">
-                      <thead className="bg-zinc-950 text-zinc-400 uppercase font-bold text-[10px] tracking-wider">
-                        <tr><th className="px-6 py-4">ID</th><th className="px-6 py-4">Nome do Pod</th><th className="px-6 py-4">Descrição</th><th className="px-6 py-4">Preço (R$)</th></tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-800/50">
-                        {produtosList.map((p: any) => (
-                          <tr key={p.id} className="hover:bg-zinc-800/30">
-                            <td className="px-6 py-4 text-zinc-500">#{p.id}</td>
-                            <td className="px-6 py-4 font-bold text-white">{p.nome}</td>
-                            <td className="px-6 py-4 text-zinc-400 truncate max-w-[200px]">{p.descricao || '-'}</td>
-                            <td className="px-6 py-4 text-pink-400 font-bold">R$ {p.preco.toFixed(2)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+            {/* ABA 1: ESTOQUE */}
+            {abaAtiva === 'estoque' && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center"><h2 className="text-lg font-black text-white">Inventário</h2><button onClick={() => {setFormEstoque({cidade_id: '', produto_id: '', sabor_id: '', quantidade: 1}); setIsAddEstoqueModalOpen(true)}} className="bg-pink-600 hover:bg-pink-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold active:scale-95 shadow-[0_0_15px_rgba(236,72,153,0.3)]">+ Nova Entrada</button></div>
+
+                {/* Visão Mobile */}
+                <div className="grid grid-cols-1 gap-4 sm:hidden">
+                  {estoqueAgrupadoArray.map((grupo: any) => (
+                    <div key={`${grupo.cidade_id}-${grupo.produto_id}`} className="bg-zinc-900/60 border border-white/5 rounded-2xl p-5 flex flex-col gap-4 relative overflow-hidden">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="text-[10px] font-black uppercase tracking-wider text-pink-500">{grupo.cidade?.nome}</span>
+                          <h3 className="text-xl font-black text-white leading-tight">{grupo.produto?.nome}</h3>
+                        </div>
+                        <span className="bg-white/10 text-white px-3 py-1.5 rounded-xl text-xs font-black">{grupo.total} un.</span>
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Sabores (Toque para editar)</p>
+                        <div className="flex flex-wrap gap-2">
+                          {grupo.variacoes.map((item: any) => (
+                            <button key={item.id} onClick={() => {setItemEditando(item); setNovaQuantidade(item.quantidade); setIsEditModalOpen(true)}} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border transition-transform active:scale-95 ${item.quantidade > 3 ? 'bg-green-500/10 text-green-400 border-green-500/20' : item.quantidade > 0 ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+                              <span className="text-white">{item.sabor?.nome}</span>
+                              <span className="bg-black/30 px-1.5 py-0.5 rounded-md">{item.quantidade}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              )}
 
-              {/* ABA 3: SABORES */}
-              {abaAtiva === 'sabores' && (
-                <div>
-                  <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/80">
-                    <h2 className="font-bold text-zinc-300">Lista de Sabores</h2>
-                    <button onClick={() => {setFormSabor({produto_id: '', nome: ''}); setIsAddSaborModalOpen(true)}} className="bg-pink-600 hover:bg-pink-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors">+ Novo Sabor</button>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm whitespace-nowrap">
-                      <thead className="bg-zinc-950 text-zinc-400 uppercase font-bold text-[10px] tracking-wider">
-                        <tr><th className="px-6 py-4">Vinculado Ao Produto</th><th className="px-6 py-4">Nome do Sabor</th></tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-800/50">
-                        {saboresList.map((s: any) => (
-                          <tr key={s.id} className="hover:bg-zinc-800/30">
-                            <td className="px-6 py-4 font-bold text-pink-500/80">{s.produto?.nome}</td>
-                            <td className="px-6 py-4 text-white font-medium">{s.nome}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                {/* Visão Desktop */}
+                <div className="hidden sm:block bg-zinc-900/40 border border-white/5 rounded-3xl overflow-hidden shadow-2xl backdrop-blur-sm">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-black/40 text-zinc-400 uppercase font-black text-[10px] tracking-[0.2em] border-b border-white/5">
+                      <tr><th className="px-6 py-5 w-32">Unidade</th><th className="px-6 py-5 w-48">Produto</th><th className="px-6 py-5">Sabores e Quantidades</th><th className="px-6 py-5 text-right w-32">Total</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {estoqueAgrupadoArray.map((grupo: any) => (
+                        <tr key={`${grupo.cidade_id}-${grupo.produto_id}`} className="hover:bg-zinc-800/40 transition-colors">
+                          <td className="px-6 py-5 text-zinc-300 font-medium align-top">{grupo.cidade?.nome}</td>
+                          <td className="px-6 py-5 font-black text-white align-top">{grupo.produto?.nome}</td>
+                          <td className="px-6 py-5 align-top">
+                            <div className="flex flex-wrap gap-2">
+                              {grupo.variacoes.map((item: any) => (
+                                <button key={item.id} onClick={() => {setItemEditando(item); setNovaQuantidade(item.quantidade); setIsEditModalOpen(true)}} title="Clique para editar" className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border hover:opacity-80 transition-opacity cursor-pointer ${item.quantidade > 3 ? 'bg-green-500/10 text-green-400 border-green-500/20' : item.quantidade > 0 ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+                                  <span className="text-zinc-200">{item.sabor?.nome}</span>
+                                  <span className="bg-black/50 px-1.5 py-0.5 rounded-md text-white">{item.quantidade}</span>
+                                </button>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-6 py-5 text-right align-top"><span className="bg-white/10 text-white px-3 py-1.5 rounded-lg text-xs font-bold">{grupo.total} un.</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* ABA 4: CIDADES */}
-              {abaAtiva === 'cidades' && (
-                <div>
-                  <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/80">
-                    <h2 className="font-bold text-zinc-300">Cidades Atendidas</h2>
-                    <button onClick={() => {setFormCidade({nome: ''}); setIsAddCidadeModalOpen(true)}} className="bg-pink-600 hover:bg-pink-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition-colors">+ Nova Cidade</button>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-sm whitespace-nowrap">
-                      <thead className="bg-zinc-950 text-zinc-400 uppercase font-bold text-[10px] tracking-wider">
-                        <tr><th className="px-6 py-4">ID</th><th className="px-6 py-4">Nome da Cidade</th></tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-800/50">
-                        {cidadesList.map((c: any) => (
-                          <tr key={c.id} className="hover:bg-zinc-800/30">
-                            <td className="px-6 py-4 text-zinc-500">#{c.id}</td>
-                            <td className="px-6 py-4 font-bold text-white">{c.nome}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+            {/* ABA 2: PRODUTOS (COM A ADIÇÃO DA IMAGEM) */}
+            {abaAtiva === 'produtos' && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center"><h2 className="text-lg font-black text-white">Catálogo</h2><button onClick={() => {setFormProduto({nome: '', descricao: '', preco: ''}); setIsAddProdutoModalOpen(true)}} className="bg-pink-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold active:scale-95 shadow-[0_0_15px_rgba(236,72,153,0.3)]">+ Criar Pod</button></div>
+                <div className="bg-zinc-900/40 border border-white/5 rounded-3xl overflow-hidden overflow-x-auto custom-scrollbar">
+                  <table className="w-full text-left text-sm whitespace-nowrap">
+                    <thead className="bg-black/40 text-zinc-400 uppercase font-black text-[10px] tracking-[0.2em]">
+                      <tr>
+                        <th className="px-6 py-5 w-20 text-center">Imagem</th>
+                        <th className="px-6 py-5">Marca/Modelo</th>
+                        <th className="px-6 py-5">Descrição</th>
+                        <th className="px-6 py-5 text-right">Valor Venda</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {produtosList.map((p: any) => (
+                        <tr key={p.id} className="hover:bg-zinc-800/40">
+                          <td className="px-6 py-3 text-center align-middle">
+                            <button 
+                              onClick={() => { setProdutoImage(p); setImageUrl(p.imagem_url || ""); setIsImageModalOpen(true); }}
+                              className="relative group w-12 h-12 bg-black/50 border border-white/5 rounded-xl flex items-center justify-center overflow-hidden hover:border-pink-500 transition-all mx-auto"
+                            >
+                              {p.imagem_url ? (
+                                <img src={p.imagem_url} alt={p.nome} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                              ) : (
+                                <span className="text-zinc-500 text-xl font-light">+</span>
+                              )}
+                              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-sm">
+                                <span className="text-[9px] text-white font-bold uppercase tracking-widest">Foto</span>
+                              </div>
+                            </button>
+                          </td>
+                          <td className="px-6 py-5 font-black text-white">{p.nome}</td>
+                          <td className="px-6 py-5 text-zinc-400 text-xs truncate max-w-[150px]">{p.descricao || 'Sem descrição'}</td>
+                          <td className="px-6 py-5 text-pink-400 font-bold text-right">R$ {p.preco.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
+              </div>
+            )}
 
-      {/* ========================================== */}
-      {/* ÁREA DOS MODAIS (Pop-ups de Formulário)    */}
-      {/* ========================================== */}
+            {/* ABA 3: SABORES */}
+            {abaAtiva === 'sabores' && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center"><h2 className="text-lg font-black text-white">Variações Cadastradas</h2><button onClick={() => {setFormSabor({produto_id: '', nome: ''}); setIsAddSaborModalOpen(true)}} className="bg-pink-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold active:scale-95 shadow-[0_0_15px_rgba(236,72,153,0.3)]">+ Novo Sabor</button></div>
+                <div className="bg-zinc-900/40 border border-white/5 rounded-3xl overflow-hidden overflow-x-auto custom-scrollbar">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-black/40 text-zinc-400 uppercase font-black text-[10px] tracking-[0.2em]">
+                      <tr><th className="px-6 py-5 w-64">Produto Base</th><th className="px-6 py-5">Sabores Registrados</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {saboresAgrupadosArray.map((grupo: any) => (
+                        <tr key={grupo.id} className="hover:bg-zinc-800/40">
+                          <td className="px-6 py-5 font-bold text-pink-500/80 align-top">{grupo.produtoNome}</td>
+                          <td className="px-6 py-5 align-top">
+                            <div className="flex flex-wrap gap-2">
+                              {grupo.sabores.map((s: any) => (
+                                <span key={s.id} className="bg-black/50 text-zinc-300 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/5">{s.nome}</span>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
-      {/* Modal: Ajustar Estoque Existente */}
+            {/* ABA 4: CIDADES */}
+            {abaAtiva === 'cidades' && (
+              <div className="space-y-6">
+                <div className="flex justify-between items-center"><h2 className="text-lg font-black text-white">Praças de Atuação</h2><button onClick={() => {setFormCidade({nome: ''}); setIsAddCidadeModalOpen(true)}} className="bg-pink-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold active:scale-95 shadow-[0_0_15px_rgba(236,72,153,0.3)]">+ Nova Praça</button></div>
+                <div className="bg-zinc-900/40 border border-white/5 rounded-3xl overflow-hidden overflow-x-auto custom-scrollbar"><table className="w-full text-left text-sm whitespace-nowrap"><thead className="bg-black/40 text-zinc-400 uppercase font-black text-[10px] tracking-[0.2em]"><tr><th className="px-6 py-5">Nome da Cidade</th></tr></thead><tbody className="divide-y divide-white/5">{cidadesList.map((c: any) => (<tr key={c.id} className="hover:bg-zinc-800/40"><td className="px-6 py-5 font-black text-white text-lg">{c.nome}</td></tr>))}</tbody></table></div>
+              </div>
+            )}
+          </>
+        )}
+      </main>
+
+      {/* 1. Modal Ajustar Estoque */}
       {isEditModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-sm p-6 space-y-6">
-            <h3 className="text-xl font-black text-white">Ajustar Estoque</h3>
-            <p className="text-zinc-400 text-sm leading-tight">{itemEditando?.produto?.nome} - {itemEditando?.sabor?.nome} <br/><span className="text-pink-500 text-xs">Unidade: {itemEditando?.cidade?.nome}</span></p>
-            <div className="flex items-center gap-4">
-              <button onClick={() => setNovaQuantidade(Math.max(0, novaQuantidade - 1))} className="w-12 h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xl font-bold">-</button>
-              <input type="number" value={novaQuantidade} onChange={(e) => setNovaQuantidade(parseInt(e.target.value) || 0)} className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl h-12 text-center text-xl font-black focus:outline-none focus:border-pink-500" />
-              <button onClick={() => setNovaQuantidade(novaQuantidade + 1)} className="w-12 h-12 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-xl font-bold">+</button>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-end sm:items-center justify-center sm:p-4">
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-t-[2.5rem] sm:rounded-[2.5rem] w-full max-w-sm p-8 space-y-6 shadow-2xl animate-in slide-in-from-bottom-full sm:zoom-in-95 duration-300">
+            <div className="text-center space-y-1">
+              <h3 className="text-2xl font-black text-white tracking-tight">Estoque Atual</h3>
+              <p className="text-pink-500 text-sm font-black uppercase tracking-widest">{itemEditando?.produto?.nome}</p>
+              <p className="text-zinc-400 text-xs font-semibold">{itemEditando?.sabor?.nome} • <span className="text-zinc-600">{itemEditando?.cidade?.nome}</span></p>
+            </div>
+            <div className="bg-zinc-900/50 p-6 rounded-[2rem] border border-white/5 space-y-6 shadow-inner">
+              <div className="flex items-center justify-center gap-4">
+                <button onClick={() => setNovaQuantidade(Math.max(0, novaQuantidade - 1))} className="w-14 h-14 rounded-full bg-zinc-800 hover:bg-pink-600 text-3xl font-black text-white flex items-center justify-center active:scale-90 transition-all shadow-lg">-</button>
+                <div className="relative flex flex-col items-center justify-center">
+                  <input type="number" value={novaQuantidade} onChange={(e) => setNovaQuantidade(parseInt(e.target.value) || 0)} className="w-24 bg-transparent text-center text-6xl font-black text-white focus:outline-none focus:text-pink-500 transition-colors p-0 m-0" style={{ WebkitAppearance: 'none', margin: 0 }} />
+                  <span className="absolute -bottom-3 text-[9px] uppercase tracking-widest text-zinc-500 font-bold">Unidades</span>
+                </div>
+                <button onClick={() => setNovaQuantidade(novaQuantidade + 1)} className="w-14 h-14 rounded-full bg-zinc-800 hover:bg-pink-600 text-3xl font-black text-white flex items-center justify-center active:scale-90 transition-all shadow-lg">+</button>
+              </div>
+              <div className="grid grid-cols-4 gap-2 pt-4 border-t border-white/5">
+                <button onClick={() => setNovaQuantidade(0)} className="col-span-4 mb-2 py-3 rounded-xl bg-red-500/10 text-red-500 hover:text-white hover:bg-red-500 text-xs font-black uppercase tracking-widest transition-all active:scale-95">Zerar Estoque</button>
+                <button onClick={() => setNovaQuantidade(Math.max(0, novaQuantidade - 10))} className="py-2.5 rounded-xl bg-black border border-white/5 text-zinc-400 text-xs font-bold hover:border-pink-500 hover:text-pink-500 active:scale-95 transition-all">-10</button>
+                <button onClick={() => setNovaQuantidade(Math.max(0, novaQuantidade - 5))} className="py-2.5 rounded-xl bg-black border border-white/5 text-zinc-400 text-xs font-bold hover:border-pink-500 hover:text-pink-500 active:scale-95 transition-all">-5</button>
+                <button onClick={() => setNovaQuantidade(novaQuantidade + 5)} className="py-2.5 rounded-xl bg-black border border-white/5 text-zinc-400 text-xs font-bold hover:border-pink-500 hover:text-pink-500 active:scale-95 transition-all">+5</button>
+                <button onClick={() => setNovaQuantidade(novaQuantidade + 10)} className="py-2.5 rounded-xl bg-black border border-white/5 text-zinc-400 text-xs font-bold hover:border-pink-500 hover:text-pink-500 active:scale-95 transition-all">+10</button>
+              </div>
             </div>
             <div className="flex gap-3 pt-2">
-              <button onClick={() => setIsEditModalOpen(false)} className="flex-1 px-4 py-3 rounded-xl font-bold bg-zinc-800 hover:bg-zinc-700">Cancelar</button>
-              <button onClick={salvarEdicaoEstoque} disabled={salvando} className="flex-1 px-4 py-3 rounded-xl font-bold bg-pink-600 hover:bg-pink-500 text-white">{salvando ? '...' : 'Salvar'}</button>
+              <button onClick={() => setIsEditModalOpen(false)} className="flex-1 py-4 rounded-2xl font-bold bg-zinc-800 hover:bg-zinc-700 text-white transition-all active:scale-95">Cancelar</button>
+              <button onClick={salvarEdicaoEstoque} disabled={salvando} className="flex-1 py-4 rounded-2xl font-black bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 text-white shadow-[0_0_20px_rgba(236,72,153,0.3)] disabled:opacity-50 transition-all active:scale-95">{salvando ? 'Salvando...' : 'Confirmar'}</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal: Dar Entrada em Novo Estoque */}
+      {/* 2. NOVO: Modal de Imagem do Produto */}
+      {isImageModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-[2rem] w-full max-w-sm p-8 space-y-6 shadow-2xl animate-in zoom-in-95 duration-300">
+            <div className="text-center space-y-1">
+              <h3 className="text-2xl font-black text-white tracking-tight">Vitrine</h3>
+              <p className="text-pink-500 text-sm font-black uppercase tracking-widest">{produtoImage?.nome}</p>
+            </div>
+            <div className="bg-zinc-900/50 p-6 rounded-[2rem] border border-white/5 flex flex-col items-center gap-6 shadow-inner">
+              <div className="w-32 h-32 rounded-2xl bg-black/50 border border-white/5 flex items-center justify-center overflow-hidden">
+                {imageUrl ? (
+                  <img src={imageUrl} alt="Preview" className="w-full h-full object-contain" />
+                ) : (
+                  <span className="text-zinc-600 text-[10px] uppercase font-bold tracking-widest">Sem Imagem</span>
+                )}
+              </div>
+              <div className="w-full space-y-2">
+                <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-2">URL da Imagem (PNG Transparente)</label>
+                <input 
+                  type="text" 
+                  value={imageUrl} 
+                  onChange={(e) => setImageUrl(e.target.value)} 
+                  placeholder="https://exemplo.com/foto-pod.png" 
+                  className="w-full bg-black border border-white/10 focus:border-pink-500 rounded-xl h-12 px-4 text-xs text-white placeholder:text-zinc-600 outline-none transition-all"
+                />
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setIsImageModalOpen(false)} className="flex-1 py-4 rounded-2xl font-bold bg-zinc-800 hover:bg-zinc-700 text-white transition-all active:scale-95 text-sm">Voltar</button>
+              <button onClick={salvarImagemProduto} disabled={salvando} className="flex-1 py-4 rounded-2xl font-black bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 text-white shadow-[0_0_20px_rgba(236,72,153,0.3)] disabled:opacity-50 transition-all active:scale-95 text-sm">{salvando ? 'Salvando...' : 'Aplicar Foto'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 3. Modal Nova Entrada (Estoque) */}
       {isAddEstoqueModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-sm p-6 space-y-4">
-            <h3 className="text-xl font-black text-white">Nova Mercadoria</h3>
-            <select className="w-full bg-zinc-950 border border-zinc-800 rounded-xl h-12 px-4 text-sm focus:border-pink-500" value={formEstoque.cidade_id} onChange={(e) => setFormEstoque({...formEstoque, cidade_id: e.target.value})}>
-              <option value="">1. Selecione a Cidade</option>
-              {cidadesList.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
-            </select>
-            <select className="w-full bg-zinc-950 border border-zinc-800 rounded-xl h-12 px-4 text-sm focus:border-pink-500" disabled={!formEstoque.cidade_id} value={formEstoque.produto_id} onChange={(e) => setFormEstoque({...formEstoque, produto_id: e.target.value, sabor_id: ''})}>
-              <option value="">2. Selecione o Produto</option>
-              {produtosList.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
-            </select>
-            <select className="w-full bg-zinc-950 border border-zinc-800 rounded-xl h-12 px-4 text-sm focus:border-pink-500" disabled={!formEstoque.produto_id} value={formEstoque.sabor_id} onChange={(e) => setFormEstoque({...formEstoque, sabor_id: e.target.value})}>
-              <option value="">3. Selecione o Sabor</option>
-              {saboresList.filter(s => s.produto_id.toString() === formEstoque.produto_id).map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}
-            </select>
-            <div className="flex items-center gap-4 pt-2">
-              <label className="text-xs font-bold text-zinc-400 w-1/2">Quantidade:</label>
-              <input type="number" value={formEstoque.quantidade} onChange={(e) => setFormEstoque({...formEstoque, quantidade: parseInt(e.target.value) || 1})} className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl h-12 text-center font-black focus:border-pink-500" />
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-[2.5rem] w-full max-w-sm p-8 space-y-6 animate-in zoom-in-95 duration-300">
+            <h3 className="text-xl font-black text-white text-center">Nova Entrada</h3>
+            <div className="space-y-4">
+              <select className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formEstoque.cidade_id} onChange={(e) => setFormEstoque({...formEstoque, cidade_id: e.target.value})}><option value="">Selecione a Cidade</option>{cidadesList.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}</select>
+              <select className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formEstoque.produto_id} onChange={(e) => setFormEstoque({...formEstoque, produto_id: e.target.value})}><option value="">Selecione o Produto</option>{produtosList.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}</select>
+              <select className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formEstoque.sabor_id} onChange={(e) => setFormEstoque({...formEstoque, sabor_id: e.target.value})}><option value="">Selecione o Sabor</option>{saboresList.filter(s => s.produto_id.toString() === formEstoque.produto_id).map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}</select>
+              <input type="number" placeholder="Quantidade" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formEstoque.quantidade} onChange={(e) => setFormEstoque({...formEstoque, quantidade: parseInt(e.target.value)})} />
             </div>
-            <div className="flex gap-3 pt-4">
-              <button onClick={() => setIsAddEstoqueModalOpen(false)} className="flex-1 px-4 py-3 rounded-xl font-bold bg-zinc-800 hover:bg-zinc-700">Cancelar</button>
-              <button onClick={salvarNovoEstoque} disabled={salvando} className="flex-1 px-4 py-3 rounded-xl font-bold bg-pink-600 hover:bg-pink-500 text-white">{salvando ? '...' : 'Adicionar'}</button>
+            <div className="flex gap-3">
+              <button onClick={() => setIsAddEstoqueModalOpen(false)} className="flex-1 py-3 rounded-xl bg-zinc-800 text-white font-bold text-sm">Cancelar</button>
+              <button onClick={salvarNovoEstoque} disabled={salvando} className="flex-1 py-3 rounded-xl bg-pink-600 text-white font-bold text-sm">{salvando ? '...' : 'Salvar'}</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal: Criar Produto do Zero */}
+      {/* 4. Modal Novo Produto */}
       {isAddProdutoModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-sm p-6 space-y-4">
-            <h3 className="text-xl font-black text-white">Criar Novo Produto</h3>
-            <p className="text-xs text-zinc-400">Ex: Ignite V150, Waka 10k...</p>
-            <input type="text" placeholder="Nome do Produto" value={formProduto.nome} onChange={(e) => setFormProduto({...formProduto, nome: e.target.value})} className="w-full bg-zinc-950 border border-zinc-800 rounded-xl h-12 px-4 focus:border-pink-500" />
-            <input type="text" placeholder="Descrição (Opcional)" value={formProduto.descricao} onChange={(e) => setFormProduto({...formProduto, descricao: e.target.value})} className="w-full bg-zinc-950 border border-zinc-800 rounded-xl h-12 px-4 focus:border-pink-500" />
-            <input type="text" placeholder="Preço (Ex: 119,90)" value={formProduto.preco} onChange={(e) => setFormProduto({...formProduto, preco: e.target.value})} className="w-full bg-zinc-950 border border-zinc-800 rounded-xl h-12 px-4 focus:border-pink-500" />
-            <div className="flex gap-3 pt-4">
-              <button onClick={() => setIsAddProdutoModalOpen(false)} className="flex-1 px-4 py-3 rounded-xl font-bold bg-zinc-800 hover:bg-zinc-700">Cancelar</button>
-              <button onClick={salvarNovoProduto} disabled={salvando} className="flex-1 px-4 py-3 rounded-xl font-bold bg-pink-600 hover:bg-pink-500 text-white">{salvando ? '...' : 'Salvar Produto'}</button>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-[2.5rem] w-full max-w-sm p-8 space-y-6 animate-in zoom-in-95 duration-300">
+            <h3 className="text-xl font-black text-white text-center">Criar Novo Pod</h3>
+            <div className="space-y-4">
+              <input type="text" placeholder="Marca / Nome" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formProduto.nome} onChange={(e) => setFormProduto({...formProduto, nome: e.target.value})} />
+              <input type="text" placeholder="Puffs, Nicotina, etc (Opcional)" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formProduto.descricao} onChange={(e) => setFormProduto({...formProduto, descricao: e.target.value})} />
+              <input type="text" placeholder="Preço (ex: 85,00)" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formProduto.preco} onChange={(e) => setFormProduto({...formProduto, preco: e.target.value})} />
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setIsAddProdutoModalOpen(false)} className="flex-1 py-3 rounded-xl bg-zinc-800 text-white font-bold text-sm">Cancelar</button>
+              <button onClick={salvarNovoProduto} disabled={salvando} className="flex-1 py-3 rounded-xl bg-pink-600 text-white font-bold text-sm">{salvando ? '...' : 'Salvar'}</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal: Criar Novo Sabor */}
+      {/* 5. Modal Novo Sabor */}
       {isAddSaborModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-sm p-6 space-y-4">
-            <h3 className="text-xl font-black text-white">Cadastrar Sabor</h3>
-            <select className="w-full bg-zinc-950 border border-zinc-800 rounded-xl h-12 px-4 text-sm focus:border-pink-500" value={formSabor.produto_id} onChange={(e) => setFormSabor({...formSabor, produto_id: e.target.value})}>
-              <option value="">Selecione o Produto (Marca)</option>
-              {produtosList.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}
-            </select>
-            <input type="text" placeholder="Nome do Sabor (Ex: Mint Ice)" value={formSabor.nome} onChange={(e) => setFormSabor({...formSabor, nome: e.target.value})} className="w-full bg-zinc-950 border border-zinc-800 rounded-xl h-12 px-4 focus:border-pink-500" />
-            <div className="flex gap-3 pt-4">
-              <button onClick={() => setIsAddSaborModalOpen(false)} className="flex-1 px-4 py-3 rounded-xl font-bold bg-zinc-800 hover:bg-zinc-700">Cancelar</button>
-              <button onClick={salvarNovoSabor} disabled={salvando} className="flex-1 px-4 py-3 rounded-xl font-bold bg-pink-600 hover:bg-pink-500 text-white">{salvando ? '...' : 'Salvar Sabor'}</button>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-[2.5rem] w-full max-w-sm p-8 space-y-6 animate-in zoom-in-95 duration-300">
+            <h3 className="text-xl font-black text-white text-center">Adicionar Sabor</h3>
+            <div className="space-y-4">
+              <select className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formSabor.produto_id} onChange={(e) => setFormSabor({...formSabor, produto_id: e.target.value})}><option value="">Produto Base</option>{produtosList.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}</select>
+              <input type="text" placeholder="Nome do Sabor (ex: Mint Ice)" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formSabor.nome} onChange={(e) => setFormSabor({...formSabor, nome: e.target.value})} />
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setIsAddSaborModalOpen(false)} className="flex-1 py-3 rounded-xl bg-zinc-800 text-white font-bold text-sm">Cancelar</button>
+              <button onClick={salvarNovoSabor} disabled={salvando} className="flex-1 py-3 rounded-xl bg-pink-600 text-white font-bold text-sm">{salvando ? '...' : 'Salvar'}</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal: Criar Nova Cidade */}
+      {/* 6. Modal Nova Cidade */}
       {isAddCidadeModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-sm p-6 space-y-4">
-            <h3 className="text-xl font-black text-white">Adicionar Cidade</h3>
-            <input type="text" placeholder="Nome da Cidade (Ex: Brasília)" value={formCidade.nome} onChange={(e) => setFormCidade({...formCidade, nome: e.target.value})} className="w-full bg-zinc-950 border border-zinc-800 rounded-xl h-12 px-4 focus:border-pink-500" />
-            <div className="flex gap-3 pt-4">
-              <button onClick={() => setIsAddCidadeModalOpen(false)} className="flex-1 px-4 py-3 rounded-xl font-bold bg-zinc-800 hover:bg-zinc-700">Cancelar</button>
-              <button onClick={salvarNovaCidade} disabled={salvando} className="flex-1 px-4 py-3 rounded-xl font-bold bg-pink-600 hover:bg-pink-500 text-white">{salvando ? '...' : 'Salvar Cidade'}</button>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-[2.5rem] w-full max-w-sm p-8 space-y-6 animate-in zoom-in-95 duration-300">
+            <h3 className="text-xl font-black text-white text-center">Nova Praça</h3>
+            <div className="space-y-4">
+              <input type="text" placeholder="Nome da Cidade" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formCidade.nome} onChange={(e) => setFormCidade({...formCidade, nome: e.target.value})} />
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setIsAddCidadeModalOpen(false)} className="flex-1 py-3 rounded-xl bg-zinc-800 text-white font-bold text-sm">Cancelar</button>
+              <button onClick={salvarNovaCidade} disabled={salvando} className="flex-1 py-3 rounded-xl bg-pink-600 text-white font-bold text-sm">{salvando ? '...' : 'Salvar'}</button>
             </div>
           </div>
         </div>
       )}
-
     </div>
   );
 }
