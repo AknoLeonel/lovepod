@@ -12,7 +12,7 @@ export default function CatalogoCidade({ params }: { params: Promise<{ cidadeId:
   const [loading, setLoading] = useState(true);
   const [selecionados, setSelecionados] = useState<Record<string, any>>({});
 
-  const numeroWhatsApp = "5561999999999"; // 🚨 SEU NÚMERO AQUI (Ex: 5511999999999)
+  const numeroWhatsApp = "5577999371685"; // 🚨 SEU NÚMERO AQUI (Ex: 5511999999999)
 
   useEffect(() => {
     async function carregarCatalogo() {
