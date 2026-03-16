@@ -13,12 +13,16 @@ export default function AdminDashboard() {
   const [verificandoSessao, setVerificandoSessao] = useState(true);
   const [loading, setLoading] = useState(true);
 
-  const [abaAtiva, setAbaAtiva] = useState<'estoque' | 'produtos' | 'sabores' | 'cidades' | 'importacao'>('estoque');
+  // 🚀 ADICIONADO: 'vendas' na tipagem da aba ativa
+  const [abaAtiva, setAbaAtiva] = useState<'vendas' | 'estoque' | 'produtos' | 'sabores' | 'cidades' | 'importacao'>('vendas');
 
   const [estoque, setEstoque] = useState<any[]>([]);
   const [cidadesList, setCidadesList] = useState<any[]>([]);
   const [produtosList, setProdutosList] = useState<any[]>([]);
   const [saboresList, setSaboresList] = useState<any[]>([]);
+  
+  // 🚀 ADICIONADO: Estado para o Histórico de Vendas
+  const [vendasList, setVendasList] = useState<any[]>([]);
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [itemEditando, setItemEditando] = useState<any>(null);
@@ -36,7 +40,7 @@ export default function AdminDashboard() {
   const [isAddCidadeModalOpen, setIsAddCidadeModalOpen] = useState(false);
   const [formCidade, setFormCidade] = useState({ nome: '' });
 
-  // NOVO: Estados do Modal de Imagem
+  // Estados do Modal de Imagem (MANTIDO)
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [produtoImage, setProdutoImage] = useState<any>(null);
   const [imageUrl, setImageUrl] = useState("");
@@ -78,17 +82,22 @@ export default function AdminDashboard() {
 
   const carregarDados = async () => {
     setLoading(true);
-    const { data: estq } = await supabase.from('estoque').select(`id, quantidade, cidade_id, produto_id, sabor_id, cidade:cidades(nome), produto:produtos(nome), sabor:sabores(nome)`).order('cidade_id');
-    const [resCidades, resProdutos, resSabores] = await Promise.all([
+    
+    // 🚀 ADICIONADO: Busca da tabela 'vendas' no Promise.all para carregar tudo junto
+    const [resEstoque, resCidades, resProdutos, resSabores, resVendas] = await Promise.all([
+      supabase.from('estoque').select(`id, quantidade, cidade_id, produto_id, sabor_id, cidade:cidades(nome), produto:produtos(nome), sabor:sabores(nome)`).order('cidade_id'),
       supabase.from('cidades').select('*').order('nome'),
       supabase.from('produtos').select('*').order('nome'),
-      supabase.from('sabores').select('*, produto:produtos(nome)').order('nome')
+      supabase.from('sabores').select('*, produto:produtos(nome)').order('nome'),
+      supabase.from('vendas').select(`id, quantidade, valor_total, metodo_pagamento, vendedor_nome, created_at, cidade:cidades(nome), produto:produtos(nome), sabor:sabores(nome)`).order('created_at', { ascending: false })
     ]);
 
-    if (estq) setEstoque(estq);
+    if (resEstoque.data) setEstoque(resEstoque.data);
     if (resCidades.data) setCidadesList(resCidades.data);
     if (resProdutos.data) setProdutosList(resProdutos.data);
     if (resSabores.data) setSaboresList(resSabores.data);
+    if (resVendas.data) setVendasList(resVendas.data);
+
     setLoading(false);
   };
 
@@ -136,10 +145,9 @@ export default function AdminDashboard() {
     setSalvando(false);
   };
 
-  // NOVO: Função para salvar a imagem do produto
+  // Função para salvar a imagem do produto (MANTIDO)
   const salvarImagemProduto = async () => {
     setSalvando(true);
-    // Certifique-se de ter a coluna "imagem_url" na sua tabela "produtos" no Supabase!
     const { error } = await supabase.from('produtos').update({ imagem_url: imageUrl }).eq('id', produtoImage.id);
     if (!error) { 
       setIsImageModalOpen(false); 
@@ -219,7 +227,6 @@ export default function AdminDashboard() {
     setIsImporting(false); setTextImport(''); carregarDados(); 
   };
 
-
   // ==========================================
   // AGRUPAMENTO DE DADOS 
   // ==========================================
@@ -253,6 +260,9 @@ export default function AdminDashboard() {
     }, {})
   ).sort((a: any, b: any) => a.produtoNome?.localeCompare(b.produtoNome));
 
+  // 🚀 ADICIONADO: CÁLCULO DOS RELATÓRIOS DE VENDA
+  const totalFaturamento = vendasList.reduce((acc, venda) => acc + (venda.valor_total * venda.quantidade), 0);
+  const totalPodsVendidos = vendasList.reduce((acc, venda) => acc + venda.quantidade, 0);
 
   // ==========================================
   // RENDERIZAÇÃO
@@ -288,6 +298,7 @@ export default function AdminDashboard() {
 
         <nav className="max-w-6xl mx-auto px-4 sm:px-8 flex gap-3 overflow-x-auto pb-4 pt-2 [&::-webkit-scrollbar]:hidden snap-x">
           {[
+            { id: 'vendas', label: '📊 Caixa & Vendas' }, // 🚀 ADICIONADO
             { id: 'importacao', label: '🚀 Importação Inteligente' },
             { id: 'estoque', label: '📦 Estoque' },
             { id: 'produtos', label: '🏷️ Produtos' },
@@ -306,6 +317,81 @@ export default function AdminDashboard() {
           <div className="flex flex-col items-center justify-center py-20 gap-4"><div className="w-8 h-8 border-4 border-pink-500/20 border-t-pink-500 rounded-full animate-spin" /><span className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Sincronizando...</span></div>
         ) : (
           <>
+            {/* 🚀 NOVA ABA 0: CAIXA E VENDAS */}
+            {abaAtiva === 'vendas' && (
+              <div className="space-y-8">
+                {/* Cards de Resumo (KPIs) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                  <div className="bg-gradient-to-br from-pink-600/20 to-rose-600/5 border border-pink-500/30 rounded-3xl p-6 sm:p-8 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-pink-500/20 blur-3xl rounded-full" />
+                    <h3 className="text-pink-400 text-xs font-black uppercase tracking-widest mb-2 relative z-10">Faturamento Bruto</h3>
+                    <p className="text-4xl sm:text-5xl font-black text-white relative z-10">R$ {totalFaturamento.toFixed(2).replace('.', ',')}</p>
+                  </div>
+                  
+                  <div className="bg-zinc-900/40 border border-white/5 rounded-3xl p-6 sm:p-8 relative overflow-hidden">
+                    <h3 className="text-zinc-400 text-xs font-black uppercase tracking-widest mb-2">Total de Pods Vendidos</h3>
+                    <p className="text-4xl sm:text-5xl font-black text-white">{totalPodsVendidos} <span className="text-xl text-zinc-600 font-medium">un.</span></p>
+                  </div>
+                </div>
+
+                {/* Tabela de Histórico */}
+                <div className="space-y-4">
+                  <h2 className="text-lg font-black text-white">Histórico de Saídas</h2>
+                  
+                  {vendasList.length === 0 ? (
+                    <div className="p-10 text-center bg-zinc-900/30 border border-white/5 rounded-3xl text-zinc-500">
+                      Nenhuma venda registrada ainda.
+                    </div>
+                  ) : (
+                    <div className="bg-zinc-900/40 border border-white/5 rounded-3xl overflow-hidden overflow-x-auto custom-scrollbar">
+                      <table className="w-full text-left text-sm whitespace-nowrap">
+                        <thead className="bg-black/40 text-zinc-400 uppercase font-black text-[10px] tracking-[0.2em]">
+                          <tr>
+                            <th className="px-6 py-5">Data/Hora</th>
+                            <th className="px-6 py-5">Vendedor</th>
+                            <th className="px-6 py-5">Produto</th>
+                            <th className="px-6 py-5">Cidade</th>
+                            <th className="px-6 py-5">Pagamento</th>
+                            <th className="px-6 py-5 text-right">Valor</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5">
+                          {vendasList.map((venda: any) => (
+                            <tr key={venda.id} className="hover:bg-zinc-800/40">
+                              <td className="px-6 py-4 text-xs text-zinc-500">
+                                {new Date(venda.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              </td>
+                              <td className="px-6 py-4 font-bold text-white">
+                                <span className="bg-white/10 px-2.5 py-1 rounded-md text-xs">{venda.vendedor_nome}</span>
+                              </td>
+                              <td className="px-6 py-4">
+                                <p className="font-black text-white text-sm">{venda.produto?.nome}</p>
+                                <p className="text-xs text-zinc-400">{venda.sabor?.nome}</p>
+                              </td>
+                              <td className="px-6 py-4 text-zinc-300 font-medium">{venda.cidade?.nome}</td>
+                              <td className="px-6 py-4">
+                                <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider
+                                  ${venda.metodo_pagamento === 'Pix' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : 
+                                    venda.metodo_pagamento === 'Cartão' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 
+                                    'bg-green-500/20 text-green-400 border border-green-500/30'}`}
+                                >
+                                  {venda.metodo_pagamento}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-right font-black text-pink-500">
+                                R$ {venda.valor_total.toFixed(2).replace('.', ',')}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ABA 1: IMPORTACAO */}
             {abaAtiva === 'importacao' && (
               <div className="space-y-6">
                 <div><h2 className="text-2xl font-black text-white">Scanner de Lote</h2><p className="text-zinc-400 text-sm mt-1">Cole a lista do WhatsApp. O sistema cria e atualiza sozinho.</p></div>
@@ -323,7 +409,7 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* ABA 1: ESTOQUE */}
+            {/* ABA 2: ESTOQUE */}
             {abaAtiva === 'estoque' && (
               <div className="space-y-6">
                 <div className="flex justify-between items-center"><h2 className="text-lg font-black text-white">Inventário</h2><button onClick={() => {setFormEstoque({cidade_id: '', produto_id: '', sabor_id: '', quantidade: 1}); setIsAddEstoqueModalOpen(true)}} className="bg-pink-600 hover:bg-pink-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold active:scale-95 shadow-[0_0_15px_rgba(236,72,153,0.3)]">+ Nova Entrada</button></div>
@@ -384,7 +470,7 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* ABA 2: PRODUTOS (COM A ADIÇÃO DA IMAGEM) */}
+            {/* ABA 3: PRODUTOS */}
             {abaAtiva === 'produtos' && (
               <div className="space-y-6">
                 <div className="flex justify-between items-center"><h2 className="text-lg font-black text-white">Catálogo</h2><button onClick={() => {setFormProduto({nome: '', descricao: '', preco: ''}); setIsAddProdutoModalOpen(true)}} className="bg-pink-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold active:scale-95 shadow-[0_0_15px_rgba(236,72,153,0.3)]">+ Criar Pod</button></div>
@@ -427,7 +513,7 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* ABA 3: SABORES */}
+            {/* ABA 4: SABORES */}
             {abaAtiva === 'sabores' && (
               <div className="space-y-6">
                 <div className="flex justify-between items-center"><h2 className="text-lg font-black text-white">Variações Cadastradas</h2><button onClick={() => {setFormSabor({produto_id: '', nome: ''}); setIsAddSaborModalOpen(true)}} className="bg-pink-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold active:scale-95 shadow-[0_0_15px_rgba(236,72,153,0.3)]">+ Novo Sabor</button></div>
@@ -455,7 +541,7 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* ABA 4: CIDADES */}
+            {/* ABA 5: CIDADES */}
             {abaAtiva === 'cidades' && (
               <div className="space-y-6">
                 <div className="flex justify-between items-center"><h2 className="text-lg font-black text-white">Praças de Atuação</h2><button onClick={() => {setFormCidade({nome: ''}); setIsAddCidadeModalOpen(true)}} className="bg-pink-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold active:scale-95 shadow-[0_0_15px_rgba(236,72,153,0.3)]">+ Nova Praça</button></div>
@@ -465,6 +551,10 @@ export default function AdminDashboard() {
           </>
         )}
       </main>
+
+      {/* ========================================== */}
+      {/* MODAIS (MANTIDOS EXATAMENTE IGUAIS)        */}
+      {/* ========================================== */}
 
       {/* 1. Modal Ajustar Estoque */}
       {isEditModalOpen && (
@@ -500,7 +590,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* 2. NOVO: Modal de Imagem do Produto */}
+      {/* 2. Modal Imagem do Produto */}
       {isImageModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-[#0a0a0a] border border-white/10 rounded-[2rem] w-full max-w-sm p-8 space-y-6 shadow-2xl animate-in zoom-in-95 duration-300">
@@ -535,7 +625,7 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* 3. Modal Nova Entrada (Estoque) */}
+      {/* 3. Modal Nova Entrada */}
       {isAddEstoqueModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-[#0a0a0a] border border-white/10 rounded-[2.5rem] w-full max-w-sm p-8 space-y-6 animate-in zoom-in-95 duration-300">
