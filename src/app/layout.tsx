@@ -39,7 +39,7 @@ export default function RootLayout({
     // Mudamos para Português do Brasil
     <html lang="pt-BR"> 
       <body
-        // Colocamos a cor de fundo preta direto no body para evitar qualquer "piscada branca" ao carregar a página
+        suppressHydrationWarning
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#030303] text-zinc-100 selection:bg-pink-500 selection:text-white min-h-screen`}
       >
         {children}
