@@ -13,7 +13,7 @@ export default function AdminDashboard() {
   const [verificandoSessao, setVerificandoSessao] = useState(true);
   const [loading, setLoading] = useState(true);
 
-  const [abaAtiva, setAbaAtiva] = useState<'vendas' | 'estoque' | 'produtos' | 'sabores' | 'cidades' | 'importacao'>('vendas');
+  const [abaAtiva, setAbaAtiva] = useState<'vendas' | 'estoque' | 'produtos' | 'cidades' | 'importacao'>('vendas');
 
   const [estoque, setEstoque] = useState<any[]>([]);
   const [cidadesList, setCidadesList] = useState<any[]>([]);
@@ -21,7 +21,7 @@ export default function AdminDashboard() {
   const [saboresList, setSaboresList] = useState<any[]>([]);
   const [vendasList, setVendasList] = useState<any[]>([]);
 
-  // 🚀 NOVOS ESTADOS: Filtros
+  // Filtros
   const [filtroVendaData, setFiltroVendaData] = useState("");
   const [filtroVendaVendedor, setFiltroVendaVendedor] = useState("");
   const [filtroVendaCidade, setFiltroVendaCidade] = useState("");
@@ -30,12 +30,18 @@ export default function AdminDashboard() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [itemEditando, setItemEditando] = useState<any>(null);
   const [novaQuantidade, setNovaQuantidade] = useState<number>(0);
+  const [novoNomeSabor, setNovoNomeSabor] = useState("");
   
   const [isAddEstoqueModalOpen, setIsAddEstoqueModalOpen] = useState(false);
   const [formEstoque, setFormEstoque] = useState({ cidade_id: '', produto_id: '', sabor_id: '', quantidade: 1 });
 
   const [isAddProdutoModalOpen, setIsAddProdutoModalOpen] = useState(false);
   const [formProduto, setFormProduto] = useState({ nome: '', descricao: '', preco: '' });
+
+  // 🚀 NOVO ESTADO: Edição de Produto (Valor, Nome, Descrição)
+  const [isEditProdutoModalOpen, setIsEditProdutoModalOpen] = useState(false);
+  const [produtoEditando, setProdutoEditando] = useState<any>(null);
+  const [editFormProduto, setEditFormProduto] = useState({ nome: '', descricao: '', preco: '' });
 
   const [isAddSaborModalOpen, setIsAddSaborModalOpen] = useState(false);
   const [formSabor, setFormSabor] = useState({ produto_id: '', nome: '' });
@@ -47,14 +53,12 @@ export default function AdminDashboard() {
   const [produtoImage, setProdutoImage] = useState<any>(null);
   const [imageUrl, setImageUrl] = useState("");
 
-  // 🚀 NOVO ESTADO: Edição de Venda
   const [isEditVendaModalOpen, setIsEditVendaModalOpen] = useState(false);
   const [vendaEditando, setVendaEditando] = useState<any>(null);
   const [novoMetodoPagamento, setNovoMetodoPagamento] = useState("");
 
   const [salvando, setSalvando] = useState(false);
 
-  // Estados da Importação
   const [textImport, setTextImport] = useState('');
   const [cityImport, setCityImport] = useState('');
   const [isImporting, setIsImporting] = useState(false);
@@ -89,8 +93,6 @@ export default function AdminDashboard() {
 
   const carregarDados = async () => {
     setLoading(true);
-    
-    // Atualizado para puxar IDs necessários nas vendas para podermos devolver o estoque
     const [resEstoque, resCidades, resProdutos, resSabores, resVendas] = await Promise.all([
       supabase.from('estoque').select(`id, quantidade, cidade_id, produto_id, sabor_id, cidade:cidades(nome), produto:produtos(nome), sabor:sabores(nome)`).order('cidade_id'),
       supabase.from('cidades').select('*').order('nome'),
@@ -139,11 +141,45 @@ export default function AdminDashboard() {
     setSalvando(false);
   };
 
+  // 🚀 NOVO: Salvar a edição do PRODUTO (Valor, Nome, etc)
+  const salvarEdicaoProduto = async () => {
+    if (!editFormProduto.nome || !editFormProduto.preco) return alert("Nome e Preço são obrigatórios.");
+    setSalvando(true);
+    const precoFormatado = parseFloat(String(editFormProduto.preco).replace(',', '.'));
+    const { error } = await supabase.from('produtos').update({
+      nome: editFormProduto.nome,
+      descricao: editFormProduto.descricao,
+      preco: precoFormatado
+    }).eq('id', produtoEditando.id);
+    
+    if (!error) { 
+      setIsEditProdutoModalOpen(false); 
+      carregarDados(); 
+    } else {
+      alert("Erro ao atualizar o produto: " + error.message);
+    }
+    setSalvando(false);
+  };
+
   const salvarNovoSabor = async () => {
     if (!formSabor.nome || !formSabor.produto_id) return alert("Selecione um produto e digite o nome do sabor.");
     setSalvando(true);
     const { error } = await supabase.from('sabores').insert([{ nome: formSabor.nome, produto_id: parseInt(formSabor.produto_id) }]);
     if (!error) { setIsAddSaborModalOpen(false); setFormSabor({produto_id: '', nome: ''}); carregarDados(); } else alert("Erro: " + error.message);
+    setSalvando(false);
+  };
+
+  const salvarEdicaoNomeSabor = async () => {
+    if (!novoNomeSabor.trim()) return alert("O nome do sabor não pode ficar vazio.");
+    setSalvando(true);
+    const { error } = await supabase.from('sabores').update({ nome: novoNomeSabor }).eq('id', itemEditando.sabor_id);
+    if (!error) {
+      alert("Nome do sabor atualizado com sucesso!");
+      carregarDados();
+      setIsEditModalOpen(false);
+    } else {
+      alert("Erro ao editar o sabor: " + error.message);
+    }
     setSalvando(false);
   };
 
@@ -170,7 +206,7 @@ export default function AdminDashboard() {
   };
 
   // ==========================================
-  // 🚀 FUNÇÕES DE EXCLUSÃO (NOVO)
+  // FUNÇÕES DE EXCLUSÃO
   // ==========================================
   const excluirItemEstoque = async (id: number) => {
     if (!confirm("Tem certeza que deseja apagar este registro de estoque completamente?")) return;
@@ -184,33 +220,28 @@ export default function AdminDashboard() {
     if (!confirm("⚠️ ATENÇÃO: Tem certeza que deseja apagar este produto? Isso só funcionará se não houver estoque ou vendas vinculadas a ele.")) return;
     setLoading(true);
     const { error } = await supabase.from('produtos').delete().eq('id', id);
-    if (error) alert("Não foi possível excluir. Provavelmente existem sabores, estoques ou vendas vinculadas a este produto. Exclua-os primeiro.\n\nDetalhes: " + error.message);
+    if (error) alert("Não foi possível excluir. Provavelmente existem sabores, estoques ou vendas vinculadas a este produto.\n\nDetalhes: " + error.message);
     carregarDados();
   };
 
   const excluirSabor = async (id: number) => {
-    if (!confirm("⚠️ ATENÇÃO: Tem certeza que deseja apagar este sabor? Isso só funcionará se não houver estoque ou vendas vinculadas a ele.")) return;
+    if (!confirm("⚠️ PERIGO: Tem certeza que deseja apagar este sabor DEFINITIVAMENTE do sistema? Todo o estoque dele também será apagado!")) return;
     setLoading(true);
+    await supabase.from('estoque').delete().eq('sabor_id', id);
     const { error } = await supabase.from('sabores').delete().eq('id', id);
-    if (error) alert("Não foi possível excluir. Provavelmente existe estoque ou vendas com este sabor.\n\nDetalhes: " + error.message);
+    if (error) alert("Não foi possível excluir. Provavelmente existem VENDAS antigas com este sabor.\n\nDetalhes: " + error.message);
+    setIsEditModalOpen(false);
     carregarDados();
   };
 
   const excluirVenda = async (venda: any) => {
     if (!confirm("Excluir esta venda e DEVOLVER o pod ao estoque?")) return;
     setLoading(true);
-    
-    // 1. Deleta a venda
     const { error: errVenda } = await supabase.from('vendas').delete().eq('id', venda.id);
     
     if (!errVenda) {
-      // 2. Devolve ao estoque
       const { data: estq } = await supabase.from('estoque')
-        .select('id, quantidade')
-        .eq('cidade_id', venda.cidade_id)
-        .eq('produto_id', venda.produto_id)
-        .eq('sabor_id', venda.sabor_id)
-        .single();
+        .select('id, quantidade').eq('cidade_id', venda.cidade_id).eq('produto_id', venda.produto_id).eq('sabor_id', venda.sabor_id).single();
       
       if (estq) {
         await supabase.from('estoque').update({ quantidade: estq.quantidade + 1 }).eq('id', estq.id);
@@ -223,8 +254,6 @@ export default function AdminDashboard() {
     carregarDados();
   };
 
-  // Funções do Scanner WhatsApp
-  const addLog = (msg: string) => setImportLogs(prev => [...prev, msg]);
   const processarLoteWhatsApp = async () => {
     if (!cityImport) return alert("Por favor, selecione a cidade onde esse estoque chegou!");
     if (!textImport.trim()) return alert("Cole a mensagem do WhatsApp na caixa de texto!");
@@ -264,7 +293,6 @@ export default function AdminDashboard() {
   // AGRUPAMENTOS E FILTROS 
   // ==========================================
   
-  // 🚀 FILTRO DE VENDAS
   const vendasFiltradas = vendasList.filter(venda => {
     const matchData = filtroVendaData ? venda.created_at.startsWith(filtroVendaData) : true;
     const matchVendedor = filtroVendaVendedor ? venda.vendedor_nome.toLowerCase().includes(filtroVendaVendedor.toLowerCase()) : true;
@@ -275,7 +303,6 @@ export default function AdminDashboard() {
   const totalFaturamento = vendasFiltradas.reduce((acc, venda) => acc + (venda.valor_total * venda.quantidade), 0);
   const totalPodsVendidos = vendasFiltradas.reduce((acc, venda) => acc + venda.quantidade, 0);
 
-  // 🚀 FILTRO E AGRUPAMENTO DE ESTOQUE
   let estoqueAgrupadoArray = Object.values(
     estoque.reduce((acc: any, item: any) => {
       const key = `${item.cidade_id}-${item.produto_id}`;
@@ -293,14 +320,6 @@ export default function AdminDashboard() {
       return matchCidade || matchProduto || matchSabor;
     });
   }
-
-  const saboresAgrupadosArray = Object.values(
-    saboresList.reduce((acc: any, s: any) => {
-      if (!acc[s.produto_id]) { acc[s.produto_id] = { id: s.produto_id, produtoNome: s.produto?.nome, sabores: [] }; }
-      acc[s.produto_id].sabores.push(s); return acc;
-    }, {})
-  ).sort((a: any, b: any) => a.produtoNome?.localeCompare(b.produtoNome));
-
 
   // ==========================================
   // RENDERIZAÇÃO
@@ -340,8 +359,7 @@ export default function AdminDashboard() {
             { id: 'importacao', label: '🚀 Importação Inteligente' },
             { id: 'estoque', label: '📦 Estoque' },
             { id: 'produtos', label: '🏷️ Produtos' },
-            { id: 'sabores', label: '💧 Sabores' },
-            { id: 'cidades', label: '🏙️ Cidades' }
+            { id: 'cidades', label: '🏙️ Cidades' } // Aba Sabores Removida
           ].map((aba) => (
             <button key={aba.id} onClick={() => setAbaAtiva(aba.id as any)} className={`snap-start shrink-0 px-6 py-3 rounded-2xl font-bold text-xs sm:text-sm transition-all duration-300 ${abaAtiva === aba.id ? 'bg-pink-600 text-white shadow-[0_4px_20px_rgba(236,72,153,0.4)] scale-100' : 'bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 hover:text-white border border-white/5 scale-95 hover:scale-100'}`}>
               {aba.label}
@@ -361,7 +379,7 @@ export default function AdminDashboard() {
             {abaAtiva === 'vendas' && (
               <div className="space-y-8">
                 
-                {/* 🚀 FILTROS DE VENDA */}
+                {/* FILTROS DE VENDA */}
                 <div className="bg-zinc-900/40 border border-white/5 rounded-3xl p-5 sm:p-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
                     <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-2 block">Filtrar por Data</label>
@@ -456,14 +474,19 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* ABA 2: ESTOQUE */}
+            {/* ========================================== */}
+            {/* ABA 2: ESTOQUE (AGORA COM SABORES INCLUSOS) */}
+            {/* ========================================== */}
             {abaAtiva === 'estoque' && (
               <div className="space-y-6">
                 <div className="flex flex-col sm:flex-row sm:justify-between items-start sm:items-center gap-4">
-                  <h2 className="text-lg font-black text-white">Inventário</h2>
+                  <h2 className="text-lg font-black text-white">Inventário & Sabores</h2>
                   <div className="flex w-full sm:w-auto items-center gap-3">
-                    {/* 🚀 FILTRO DE ESTOQUE */}
-                    <input type="text" placeholder="Buscar produto, sabor ou cidade..." value={filtroEstoque} onChange={e => setFiltroEstoque(e.target.value)} className="flex-1 sm:w-64 bg-black/50 border border-white/10 focus:border-pink-500 rounded-xl h-10 px-4 text-xs text-white outline-none" />
+                    {/* FILTRO DE ESTOQUE */}
+                    <input type="text" placeholder="Buscar produto, sabor ou cidade..." value={filtroEstoque} onChange={e => setFiltroEstoque(e.target.value)} className="flex-1 sm:w-56 bg-black/50 border border-white/10 focus:border-pink-500 rounded-xl h-10 px-4 text-xs text-white outline-none" />
+                    
+                    <button onClick={() => {setFormSabor({produto_id: '', nome: ''}); setIsAddSaborModalOpen(true)}} className="bg-purple-600/20 text-purple-400 hover:bg-purple-600 hover:text-white border border-purple-500/30 px-4 py-2.5 rounded-xl text-xs font-bold active:scale-95 transition-all whitespace-nowrap">+ Novo Sabor</button>
+                    
                     <button onClick={() => {setFormEstoque({cidade_id: '', produto_id: '', sabor_id: '', quantidade: 1}); setIsAddEstoqueModalOpen(true)}} className="bg-pink-600 hover:bg-pink-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold active:scale-95 shadow-[0_0_15px_rgba(236,72,153,0.3)] whitespace-nowrap">+ Nova Entrada</button>
                   </div>
                 </div>
@@ -483,10 +506,10 @@ export default function AdminDashboard() {
                             <span className="bg-white/10 text-white px-3 py-1.5 rounded-xl text-xs font-black">{grupo.total} un.</span>
                           </div>
                           <div className="space-y-2">
-                            <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Sabores (Toque para editar)</p>
+                            <p className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold">Sabores (Toque para editar ou excluir)</p>
                             <div className="flex flex-wrap gap-2">
                               {grupo.variacoes.map((item: any) => (
-                                <button key={item.id} onClick={() => {setItemEditando(item); setNovaQuantidade(item.quantidade); setIsEditModalOpen(true)}} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border transition-transform active:scale-95 ${item.quantidade > 3 ? 'bg-green-500/10 text-green-400 border-green-500/20' : item.quantidade > 0 ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+                                <button key={item.id} onClick={() => {setItemEditando(item); setNovaQuantidade(item.quantidade); setNovoNomeSabor(item.sabor?.nome || ""); setIsEditModalOpen(true)}} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border transition-transform active:scale-95 ${item.quantidade > 3 ? 'bg-green-500/10 text-green-400 border-green-500/20' : item.quantidade > 0 ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
                                   <span className="text-white">{item.sabor?.nome}</span>
                                   <span className="bg-black/30 px-1.5 py-0.5 rounded-md">{item.quantidade}</span>
                                 </button>
@@ -510,7 +533,7 @@ export default function AdminDashboard() {
                               <td className="px-6 py-5 align-top">
                                 <div className="flex flex-wrap gap-2">
                                   {grupo.variacoes.map((item: any) => (
-                                    <button key={item.id} onClick={() => {setItemEditando(item); setNovaQuantidade(item.quantidade); setIsEditModalOpen(true)}} title="Clique para editar" className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border hover:opacity-80 transition-opacity cursor-pointer ${item.quantidade > 3 ? 'bg-green-500/10 text-green-400 border-green-500/20' : item.quantidade > 0 ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
+                                    <button key={item.id} onClick={() => {setItemEditando(item); setNovaQuantidade(item.quantidade); setNovoNomeSabor(item.sabor?.nome || ""); setIsEditModalOpen(true)}} title="Clique para gerenciar (Editar ou Excluir)" className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border hover:opacity-80 transition-opacity cursor-pointer ${item.quantidade > 3 ? 'bg-green-500/10 text-green-400 border-green-500/20' : item.quantidade > 0 ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' : 'bg-red-500/10 text-red-400 border-red-500/20'}`}>
                                       <span className="text-zinc-200">{item.sabor?.nome}</span>
                                       <span className="bg-black/50 px-1.5 py-0.5 rounded-md text-white">{item.quantidade}</span>
                                     </button>
@@ -540,7 +563,7 @@ export default function AdminDashboard() {
                         <th className="px-6 py-5">Marca/Modelo</th>
                         <th className="px-6 py-5">Descrição</th>
                         <th className="px-6 py-5 text-right">Valor Venda</th>
-                        <th className="px-6 py-5 w-16 text-center">Ação</th>
+                        <th className="px-6 py-5 w-24 text-center">Ações</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
@@ -555,8 +578,20 @@ export default function AdminDashboard() {
                           <td className="px-6 py-5 font-black text-white">{p.nome}</td>
                           <td className="px-6 py-5 text-zinc-400 text-xs truncate max-w-[150px]">{p.descricao || 'Sem descrição'}</td>
                           <td className="px-6 py-5 text-pink-400 font-bold text-right">R$ {p.preco.toFixed(2)}</td>
-                          <td className="px-6 py-5 text-center">
-                            {/* 🚀 BOTÃO EXCLUIR PRODUTO */}
+                          <td className="px-6 py-5 text-center flex items-center justify-center gap-2">
+                            {/* 🚀 BOTÃO EDITAR PRODUTO */}
+                            <button 
+                              onClick={() => {
+                                setProdutoEditando(p);
+                                setEditFormProduto({ nome: p.nome, descricao: p.descricao || '', preco: p.preco.toFixed(2) });
+                                setIsEditProdutoModalOpen(true);
+                              }} 
+                              className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors" 
+                              title="Editar Valor/Info do Produto"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                            </button>
+                            {/* BOTÃO EXCLUIR PRODUTO */}
                             <button onClick={() => excluirProduto(p.id)} className="p-2 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-lg transition-colors" title="Excluir Produto">
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                             </button>
@@ -569,41 +604,7 @@ export default function AdminDashboard() {
               </div>
             )}
 
-            {/* ABA 4: SABORES */}
-            {abaAtiva === 'sabores' && (
-              <div className="space-y-6">
-                <div className="flex justify-between items-center"><h2 className="text-lg font-black text-white">Variações Cadastradas</h2><button onClick={() => {setFormSabor({produto_id: '', nome: ''}); setIsAddSaborModalOpen(true)}} className="bg-pink-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold active:scale-95 shadow-[0_0_15px_rgba(236,72,153,0.3)]">+ Novo Sabor</button></div>
-                <div className="bg-zinc-900/40 border border-white/5 rounded-3xl overflow-hidden overflow-x-auto custom-scrollbar">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-black/40 text-zinc-400 uppercase font-black text-[10px] tracking-[0.2em]">
-                      <tr><th className="px-6 py-5 w-64">Produto Base</th><th className="px-6 py-5">Sabores Registrados (Clique no [x] para excluir)</th></tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/5">
-                      {saboresAgrupadosArray.map((grupo: any) => (
-                        <tr key={grupo.id} className="hover:bg-zinc-800/40">
-                          <td className="px-6 py-5 font-bold text-pink-500/80 align-top">{grupo.produtoNome}</td>
-                          <td className="px-6 py-5 align-top">
-                            <div className="flex flex-wrap gap-2">
-                              {grupo.sabores.map((s: any) => (
-                                <div key={s.id} className="flex items-center bg-black/50 text-zinc-300 pl-3 pr-1 py-1 rounded-lg text-xs font-medium border border-white/5 group">
-                                  <span>{s.nome}</span>
-                                  {/* 🚀 BOTÃO EXCLUIR SABOR */}
-                                  <button onClick={() => excluirSabor(s.id)} className="ml-2 w-5 h-5 rounded hover:bg-red-500/20 text-zinc-600 hover:text-red-400 flex items-center justify-center transition-colors">
-                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* ABA 5: CIDADES */}
+            {/* ABA 4: CIDADES */}
             {abaAtiva === 'cidades' && (
               <div className="space-y-6">
                 <div className="flex justify-between items-center"><h2 className="text-lg font-black text-white">Praças de Atuação</h2><button onClick={() => {setFormCidade({nome: ''}); setIsAddCidadeModalOpen(true)}} className="bg-pink-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold active:scale-95 shadow-[0_0_15px_rgba(236,72,153,0.3)]">+ Nova Praça</button></div>
@@ -618,47 +619,72 @@ export default function AdminDashboard() {
       {/* MODAIS */}
       {/* ========================================== */}
 
-      {/* 1. Modal Ajustar/Excluir Estoque */}
+      {/* 1. 🚀 Modal Ajustar/Excluir Estoque e SABOR */}
       {isEditModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-end sm:items-center justify-center sm:p-4">
           <div className="bg-[#0a0a0a] border border-white/10 rounded-t-[2.5rem] sm:rounded-[2.5rem] w-full max-w-sm p-8 space-y-6 shadow-2xl animate-in slide-in-from-bottom-full sm:zoom-in-95 duration-300 relative">
             
-            {/* 🚀 BOTÃO EXCLUIR ITEM DO ESTOQUE */}
             <button onClick={() => excluirItemEstoque(itemEditando.id)} className="absolute top-6 right-6 p-2 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-xl transition-all" title="Apagar Registro">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
             </button>
 
             <div className="text-center space-y-1 pr-8">
-              <h3 className="text-2xl font-black text-white tracking-tight">Estoque Atual</h3>
+              <h3 className="text-2xl font-black text-white tracking-tight">Gerenciar Sabor</h3>
               <p className="text-pink-500 text-sm font-black uppercase tracking-widest">{itemEditando?.produto?.nome}</p>
-              <p className="text-zinc-400 text-xs font-semibold">{itemEditando?.sabor?.nome} • <span className="text-zinc-600">{itemEditando?.cidade?.nome}</span></p>
+              <p className="text-zinc-500 text-[10px] font-bold uppercase tracking-widest">{itemEditando?.cidade?.nome}</p>
             </div>
+
             <div className="bg-zinc-900/50 p-6 rounded-[2rem] border border-white/5 space-y-6 shadow-inner">
-              <div className="flex items-center justify-center gap-4">
-                <button onClick={() => setNovaQuantidade(Math.max(0, novaQuantidade - 1))} className="w-14 h-14 rounded-full bg-zinc-800 hover:bg-pink-600 text-3xl font-black text-white flex items-center justify-center active:scale-90 transition-all shadow-lg">-</button>
-                <div className="relative flex flex-col items-center justify-center">
-                  <input type="number" value={novaQuantidade} onChange={(e) => setNovaQuantidade(parseInt(e.target.value) || 0)} className="w-24 bg-transparent text-center text-6xl font-black text-white focus:outline-none focus:text-pink-500 transition-colors p-0 m-0" style={{ WebkitAppearance: 'none', margin: 0 }} />
-                  <span className="absolute -bottom-3 text-[9px] uppercase tracking-widest text-zinc-500 font-bold">Unidades</span>
+              
+              {/* EDITAR NOME DO SABOR */}
+              <div className="space-y-2">
+                <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-2">Editar Nome do Sabor</label>
+                <div className="flex gap-2">
+                  <input type="text" value={novoNomeSabor} onChange={(e) => setNovoNomeSabor(e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-xl h-12 px-4 text-sm text-white focus:border-pink-500 outline-none transition-all" />
+                  <button onClick={salvarEdicaoNomeSabor} disabled={salvando} className="bg-zinc-800 hover:bg-pink-600 text-white px-4 rounded-xl text-xs font-bold transition-colors active:scale-95">Salvar</button>
                 </div>
-                <button onClick={() => setNovaQuantidade(novaQuantidade + 1)} className="w-14 h-14 rounded-full bg-zinc-800 hover:bg-pink-600 text-3xl font-black text-white flex items-center justify-center active:scale-90 transition-all shadow-lg">+</button>
               </div>
-              <div className="grid grid-cols-4 gap-2 pt-4 border-t border-white/5">
-                <button onClick={() => setNovaQuantidade(0)} className="col-span-4 mb-2 py-3 rounded-xl bg-red-500/10 text-red-500 hover:text-white hover:bg-red-500 text-xs font-black uppercase tracking-widest transition-all active:scale-95">Zerar Estoque</button>
-                <button onClick={() => setNovaQuantidade(Math.max(0, novaQuantidade - 10))} className="py-2.5 rounded-xl bg-black border border-white/5 text-zinc-400 text-xs font-bold hover:border-pink-500 hover:text-pink-500 active:scale-95 transition-all">-10</button>
-                <button onClick={() => setNovaQuantidade(Math.max(0, novaQuantidade - 5))} className="py-2.5 rounded-xl bg-black border border-white/5 text-zinc-400 text-xs font-bold hover:border-pink-500 hover:text-pink-500 active:scale-95 transition-all">-5</button>
-                <button onClick={() => setNovaQuantidade(novaQuantidade + 5)} className="py-2.5 rounded-xl bg-black border border-white/5 text-zinc-400 text-xs font-bold hover:border-pink-500 hover:text-pink-500 active:scale-95 transition-all">+5</button>
-                <button onClick={() => setNovaQuantidade(novaQuantidade + 10)} className="py-2.5 rounded-xl bg-black border border-white/5 text-zinc-400 text-xs font-bold hover:border-pink-500 hover:text-pink-500 active:scale-95 transition-all">+10</button>
+
+              <div className="h-px w-full bg-white/5" />
+
+              {/* EDITAR ESTOQUE */}
+              <div className="space-y-2">
+                <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-2">Quantidade em Estoque</label>
+                <div className="flex items-center justify-center gap-4">
+                  <button onClick={() => setNovaQuantidade(Math.max(0, novaQuantidade - 1))} className="w-12 h-12 rounded-full bg-zinc-800 hover:bg-pink-600 text-2xl font-black text-white flex items-center justify-center active:scale-90 transition-all">-</button>
+                  <div className="relative flex flex-col items-center justify-center">
+                    <input type="number" value={novaQuantidade} onChange={(e) => setNovaQuantidade(parseInt(e.target.value) || 0)} className="w-20 bg-transparent text-center text-5xl font-black text-white focus:outline-none focus:text-pink-500 transition-colors p-0 m-0" style={{ WebkitAppearance: 'none', margin: 0 }} />
+                  </div>
+                  <button onClick={() => setNovaQuantidade(novaQuantidade + 1)} className="w-12 h-12 rounded-full bg-zinc-800 hover:bg-pink-600 text-2xl font-black text-white flex items-center justify-center active:scale-90 transition-all">+</button>
+                </div>
+                <div className="grid grid-cols-4 gap-2 pt-2">
+                  <button onClick={() => setNovaQuantidade(0)} className="col-span-4 mb-1 py-2 rounded-xl bg-black border border-white/5 text-zinc-400 hover:text-white hover:bg-zinc-800 text-xs font-black uppercase tracking-widest transition-all active:scale-95">Zerar Estoque</button>
+                  <button onClick={() => setNovaQuantidade(Math.max(0, novaQuantidade - 10))} className="py-2 rounded-xl bg-black border border-white/5 text-zinc-400 text-xs font-bold hover:border-pink-500 hover:text-pink-500 active:scale-95 transition-all">-10</button>
+                  <button onClick={() => setNovaQuantidade(Math.max(0, novaQuantidade - 5))} className="py-2 rounded-xl bg-black border border-white/5 text-zinc-400 text-xs font-bold hover:border-pink-500 hover:text-pink-500 active:scale-95 transition-all">-5</button>
+                  <button onClick={() => setNovaQuantidade(novaQuantidade + 5)} className="py-2 rounded-xl bg-black border border-white/5 text-zinc-400 text-xs font-bold hover:border-pink-500 hover:text-pink-500 active:scale-95 transition-all">+5</button>
+                  <button onClick={() => setNovaQuantidade(novaQuantidade + 10)} className="py-2 rounded-xl bg-black border border-white/5 text-zinc-400 text-xs font-bold hover:border-pink-500 hover:text-pink-500 active:scale-95 transition-all">+10</button>
+                </div>
               </div>
+
             </div>
-            <div className="flex gap-3 pt-2">
-              <button onClick={() => setIsEditModalOpen(false)} className="flex-1 py-4 rounded-2xl font-bold bg-zinc-800 hover:bg-zinc-700 text-white transition-all active:scale-95">Cancelar</button>
-              <button onClick={salvarEdicaoEstoque} disabled={salvando} className="flex-1 py-4 rounded-2xl font-black bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 text-white shadow-[0_0_20px_rgba(236,72,153,0.3)] disabled:opacity-50 transition-all active:scale-95">{salvando ? 'Salvando...' : 'Confirmar'}</button>
+
+            {/* BOTÕES FINAIS E EXCLUSÃO DO SABOR */}
+            <div className="flex flex-col gap-2 pt-2">
+              <div className="flex gap-3">
+                <button onClick={() => setIsEditModalOpen(false)} className="flex-1 py-3.5 rounded-2xl font-bold bg-zinc-800 hover:bg-zinc-700 text-white transition-all active:scale-95 text-sm">Cancelar</button>
+                <button onClick={salvarEdicaoEstoque} disabled={salvando} className="flex-1 py-3.5 rounded-2xl font-black bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 text-white shadow-[0_0_20px_rgba(236,72,153,0.3)] disabled:opacity-50 transition-all active:scale-95 text-sm">{salvando ? 'Salvando...' : 'Confirmar Estoque'}</button>
+              </div>
+              
+              <button onClick={() => excluirSabor(itemEditando.sabor_id)} className="w-full py-3.5 mt-2 rounded-2xl font-bold bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white transition-all active:scale-95 text-xs uppercase tracking-widest flex items-center justify-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                Excluir Sabor Permanentemente
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 🚀 MODAL EDITAR VENDA (Pagamento) */}
+      {/* Modal Editar Venda (Pagamento) */}
       {isEditVendaModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-[#0a0a0a] border border-white/10 rounded-[2rem] w-full max-w-sm p-8 space-y-6 shadow-2xl animate-in zoom-in-95 duration-300">
@@ -681,7 +707,34 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* MODAIS MANTIDOS (Nova Entrada, Produto, Imagem, Sabor, Cidade)... */}
+      {/* 🚀 NOVO MODAL: EDITAR PRODUTO (VALOR/NOME) */}
+      {isEditProdutoModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-[2.5rem] w-full max-w-sm p-8 space-y-6 shadow-2xl animate-in zoom-in-95 duration-300">
+            <h3 className="text-xl font-black text-white text-center">Editar Pod</h3>
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-2">Marca / Nome</label>
+                <input type="text" placeholder="Marca / Nome" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={editFormProduto.nome} onChange={(e) => setEditFormProduto({...editFormProduto, nome: e.target.value})} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-2">Descrição</label>
+                <input type="text" placeholder="Puffs, Nicotina, etc" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={editFormProduto.descricao} onChange={(e) => setEditFormProduto({...editFormProduto, descricao: e.target.value})} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-2">Preço (R$)</label>
+                <input type="text" placeholder="Ex: 85,00" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={editFormProduto.preco} onChange={(e) => setEditFormProduto({...editFormProduto, preco: e.target.value})} />
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setIsEditProdutoModalOpen(false)} className="flex-1 py-3 rounded-xl bg-zinc-800 text-white font-bold text-sm">Cancelar</button>
+              <button onClick={salvarEdicaoProduto} disabled={salvando} className="flex-1 py-3 rounded-xl bg-pink-600 text-white font-bold text-sm">{salvando ? 'Salvando...' : 'Atualizar Pod'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Outros Modais (Imagem, Nova Entrada, Novo Produto, Novo Sabor, Nova Cidade)... */}
       {isImageModalOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-[#0a0a0a] border border-white/10 rounded-[2rem] w-full max-w-sm p-8 space-y-6 shadow-2xl animate-in zoom-in-95 duration-300">
