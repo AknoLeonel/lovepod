@@ -13,7 +13,7 @@ export default function AdminDashboard() {
   const [verificandoSessao, setVerificandoSessao] = useState(true);
   const [loading, setLoading] = useState(true);
 
-  const [abaAtiva, setAbaAtiva] = useState<'vendas' | 'estoque' | 'produtos' | 'cidades' | 'importacao'>('vendas');
+  const [abaAtiva, setAbaAtiva] = useState<'vendas' | 'estoque' | 'produtos' | 'sabores' | 'cidades' | 'importacao'>('vendas');
 
   const [estoque, setEstoque] = useState<any[]>([]);
   const [cidadesList, setCidadesList] = useState<any[]>([]);
@@ -21,7 +21,7 @@ export default function AdminDashboard() {
   const [saboresList, setSaboresList] = useState<any[]>([]);
   const [vendasList, setVendasList] = useState<any[]>([]);
 
-  // Filtros
+  // 🚀 NOVOS ESTADOS: Filtros
   const [filtroVendaData, setFiltroVendaData] = useState("");
   const [filtroVendaVendedor, setFiltroVendaVendedor] = useState("");
   const [filtroVendaCidade, setFiltroVendaCidade] = useState("");
@@ -53,12 +53,14 @@ export default function AdminDashboard() {
   const [produtoImage, setProdutoImage] = useState<any>(null);
   const [imageUrl, setImageUrl] = useState("");
 
+  // 🚀 NOVO ESTADO: Edição de Venda
   const [isEditVendaModalOpen, setIsEditVendaModalOpen] = useState(false);
   const [vendaEditando, setVendaEditando] = useState<any>(null);
   const [novoMetodoPagamento, setNovoMetodoPagamento] = useState("");
 
   const [salvando, setSalvando] = useState(false);
 
+  // Estados da Importação
   const [textImport, setTextImport] = useState('');
   const [cityImport, setCityImport] = useState('');
   const [isImporting, setIsImporting] = useState(false);
@@ -93,6 +95,8 @@ export default function AdminDashboard() {
 
   const carregarDados = async () => {
     setLoading(true);
+    
+    // Atualizado para puxar IDs necessários nas vendas para podermos devolver o estoque
     const [resEstoque, resCidades, resProdutos, resSabores, resVendas] = await Promise.all([
       supabase.from('estoque').select(`id, quantidade, cidade_id, produto_id, sabor_id, cidade:cidades(nome), produto:produtos(nome), sabor:sabores(nome)`).order('cidade_id'),
       supabase.from('cidades').select('*').order('nome'),
@@ -206,7 +210,7 @@ export default function AdminDashboard() {
   };
 
   // ==========================================
-  // FUNÇÕES DE EXCLUSÃO
+  // 🚀 FUNÇÕES DE EXCLUSÃO
   // ==========================================
   const excluirItemEstoque = async (id: number) => {
     if (!confirm("Tem certeza que deseja apagar este registro de estoque completamente?")) return;
@@ -220,7 +224,7 @@ export default function AdminDashboard() {
     if (!confirm("⚠️ ATENÇÃO: Tem certeza que deseja apagar este produto? Isso só funcionará se não houver estoque ou vendas vinculadas a ele.")) return;
     setLoading(true);
     const { error } = await supabase.from('produtos').delete().eq('id', id);
-    if (error) alert("Não foi possível excluir. Provavelmente existem sabores, estoques ou vendas vinculadas a este produto.\n\nDetalhes: " + error.message);
+    if (error) alert("Não foi possível excluir. Provavelmente existem sabores, estoques ou vendas vinculadas a este produto. Exclua-os primeiro.\n\nDetalhes: " + error.message);
     carregarDados();
   };
 
@@ -237,11 +241,18 @@ export default function AdminDashboard() {
   const excluirVenda = async (venda: any) => {
     if (!confirm("Excluir esta venda e DEVOLVER o pod ao estoque?")) return;
     setLoading(true);
+    
+    // 1. Deleta a venda
     const { error: errVenda } = await supabase.from('vendas').delete().eq('id', venda.id);
     
     if (!errVenda) {
+      // 2. Devolve ao estoque
       const { data: estq } = await supabase.from('estoque')
-        .select('id, quantidade').eq('cidade_id', venda.cidade_id).eq('produto_id', venda.produto_id).eq('sabor_id', venda.sabor_id).single();
+        .select('id, quantidade')
+        .eq('cidade_id', venda.cidade_id)
+        .eq('produto_id', venda.produto_id)
+        .eq('sabor_id', venda.sabor_id)
+        .single();
       
       if (estq) {
         await supabase.from('estoque').update({ quantidade: estq.quantidade + 1 }).eq('id', estq.id);
@@ -254,38 +265,90 @@ export default function AdminDashboard() {
     carregarDados();
   };
 
+  // ==========================================
+  // IMPORTAÇÃO INTELIGENTE (AGORA COM TRATAMENTO DE ERROS)
+  // ==========================================
+  const addLog = (msg: string) => setImportLogs(prev => [...prev, msg]);
+
   const processarLoteWhatsApp = async () => {
     if (!cityImport) return alert("Por favor, selecione a cidade onde esse estoque chegou!");
     if (!textImport.trim()) return alert("Cole a mensagem do WhatsApp na caixa de texto!");
 
-    setIsImporting(true); setImportLogs(["🚀 Iniciando leitura do lote..."]);
-    const linhas = textImport.split('\n'); let produtoAtualId = null; let produtoAtualNome = ""; let itensProcessados = 0;
+    setIsImporting(true); 
+    setImportLogs(["🚀 Iniciando leitura do lote..."]);
+    
+    try {
+      const linhas = textImport.split('\n'); 
+      let produtoAtualId = null; 
+      let produtoAtualNome = ""; 
+      let itensProcessados = 0;
 
-    for (const linha of linhas) {
-      const txt = linha.trim(); if (!txt) continue;
-      if (txt.includes('✅')) {
-        const partes = txt.split('✅'); produtoAtualNome = partes[0].trim();
-        const precoMatch = txt.match(/R\$\s*:\s*([\d,]+)/i) || txt.match(/R\$\s*([\d,]+)/i) || txt.match(/([\d,]+)/);
-        const precoAtual = precoMatch ? parseFloat(precoMatch[1].replace(',', '.')) : 0;
-        addLog(`📦 Marca: ${produtoAtualNome}`);
-        const { data: pData } = await supabase.from('produtos').select('id').ilike('nome', produtoAtualNome).limit(1);
-        if (pData && pData.length > 0) { produtoAtualId = pData[0].id; } else { const { data: newProd } = await supabase.from('produtos').insert([{ nome: produtoAtualNome, preco: precoAtual, descricao: 'Importação Rápida' }]).select().single(); produtoAtualId = newProd?.id; }
-        continue;
-      }
+      for (const linha of linhas) {
+        const txt = linha.trim(); 
+        if (!txt) continue;
+        
+        if (txt.includes('✅')) {
+          const partes = txt.split('✅'); 
+          produtoAtualNome = partes[0].trim();
+          const precoMatch = txt.match(/R\$\s*:\s*([\d,]+)/i) || txt.match(/R\$\s*([\d,]+)/i) || txt.match(/([\d,]+)/);
+          const precoAtual = precoMatch ? parseFloat(precoMatch[1].replace(',', '.')) : 0;
+          addLog(`📦 Marca: ${produtoAtualNome}`);
+          
+          const { data: pData, error: errBuscaP } = await supabase.from('produtos').select('id').ilike('nome', produtoAtualNome).limit(1);
+          if (errBuscaP) throw errBuscaP;
 
-      const matchSabor = txt.match(/^(\d+)\s*[-–]\s*(.+)$/);
-      if (matchSabor && produtoAtualId) {
-        const quantidade = parseInt(matchSabor[1]); const saborNome = matchSabor[2].trim(); let saborId = null;
-        const { data: sData } = await supabase.from('sabores').select('id').eq('produto_id', produtoAtualId).ilike('nome', saborNome).limit(1);
-        if (sData && sData.length > 0) { saborId = sData[0].id; } else { const { data: newSab } = await supabase.from('sabores').insert([{ nome: saborNome, produto_id: produtoAtualId }]).select().single(); saborId = newSab?.id; }
-        if (saborId) {
-          const { data: eData } = await supabase.from('estoque').select('*').eq('cidade_id', parseInt(cityImport)).eq('produto_id', produtoAtualId).eq('sabor_id', saborId).limit(1);
-          if (eData && eData.length > 0) { await supabase.from('estoque').update({ quantidade: eData[0].quantidade + quantidade }).eq('id', eData[0].id); } else { await supabase.from('estoque').insert([{ cidade_id: parseInt(cityImport), produto_id: produtoAtualId, sabor_id: saborId, quantidade: quantidade }]); }
-          addLog(`   ✅ ${quantidade}x ${saborNome} guardado`); itensProcessados++;
+          if (pData && pData.length > 0) { 
+            produtoAtualId = pData[0].id; 
+          } else { 
+            const { data: newProd, error: errCriaP } = await supabase.from('produtos').insert([{ nome: produtoAtualNome, preco: precoAtual, descricao: 'Importação Rápida' }]).select().single(); 
+            if (errCriaP) throw errCriaP;
+            produtoAtualId = newProd?.id; 
+          }
+          continue;
+        }
+
+        const matchSabor = txt.match(/^(\d+)\s*[-–]\s*(.+)$/);
+        if (matchSabor && produtoAtualId) {
+          const quantidade = parseInt(matchSabor[1]); 
+          const saborNome = matchSabor[2].trim(); 
+          let saborId = null;
+          
+          const { data: sData, error: errBuscaS } = await supabase.from('sabores').select('id').eq('produto_id', produtoAtualId).ilike('nome', saborNome).limit(1);
+          if (errBuscaS) throw errBuscaS;
+
+          if (sData && sData.length > 0) { 
+            saborId = sData[0].id; 
+          } else { 
+            const { data: newSab, error: errCriaS } = await supabase.from('sabores').insert([{ nome: saborNome, produto_id: produtoAtualId }]).select().single(); 
+            if (errCriaS) throw errCriaS;
+            saborId = newSab?.id; 
+          }
+          
+          if (saborId) {
+            const { data: eData, error: errBuscaE } = await supabase.from('estoque').select('*').eq('cidade_id', parseInt(cityImport)).eq('produto_id', produtoAtualId).eq('sabor_id', saborId).limit(1);
+            if (errBuscaE) throw errBuscaE;
+
+            if (eData && eData.length > 0) { 
+              const { error: errUpdE } = await supabase.from('estoque').update({ quantidade: eData[0].quantidade + quantidade }).eq('id', eData[0].id); 
+              if (errUpdE) throw errUpdE;
+            } else { 
+              const { error: errInsE } = await supabase.from('estoque').insert([{ cidade_id: parseInt(cityImport), produto_id: produtoAtualId, sabor_id: saborId, quantidade: quantidade }]); 
+              if (errInsE) throw errInsE;
+            }
+            addLog(`   ✅ ${quantidade}x ${saborNome} guardado`); 
+            itensProcessados++;
+          }
         }
       }
+      addLog(`🎉 PRONTO! ${itensProcessados} lotes foram guardados!`); 
+      setTextImport(''); 
+      carregarDados(); 
+    } catch (error: any) {
+      addLog(`❌ ERRO ENCONTRADO: ${error.message}`);
+      alert(`A importação foi interrompida devido a um erro no sistema. Detalhes no terminal do log.\n\nErro: ${error.message}`);
+    } finally {
+      setIsImporting(false); 
     }
-    addLog(`🎉 PRONTO! ${itensProcessados} lotes foram guardados!`); setIsImporting(false); setTextImport(''); carregarDados(); 
   };
 
 
@@ -293,6 +356,7 @@ export default function AdminDashboard() {
   // AGRUPAMENTOS E FILTROS 
   // ==========================================
   
+  // 🚀 FILTRO DE VENDAS
   const vendasFiltradas = vendasList.filter(venda => {
     const matchData = filtroVendaData ? venda.created_at.startsWith(filtroVendaData) : true;
     const matchVendedor = filtroVendaVendedor ? venda.vendedor_nome.toLowerCase().includes(filtroVendaVendedor.toLowerCase()) : true;
@@ -303,6 +367,7 @@ export default function AdminDashboard() {
   const totalFaturamento = vendasFiltradas.reduce((acc, venda) => acc + (venda.valor_total * venda.quantidade), 0);
   const totalPodsVendidos = vendasFiltradas.reduce((acc, venda) => acc + venda.quantidade, 0);
 
+  // 🚀 FILTRO E AGRUPAMENTO DE ESTOQUE
   let estoqueAgrupadoArray = Object.values(
     estoque.reduce((acc: any, item: any) => {
       const key = `${item.cidade_id}-${item.produto_id}`;
