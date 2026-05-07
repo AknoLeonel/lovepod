@@ -21,10 +21,12 @@ export default function AdminDashboard() {
   const [saboresList, setSaboresList] = useState<any[]>([]);
   const [vendasList, setVendasList] = useState<any[]>([]);
 
-  // 🚀 NOVOS ESTADOS: Filtros
-  const [filtroVendaData, setFiltroVendaData] = useState("");
+  // 🚀 NOVOS ESTADOS: Filtros de Venda
+  const [filtroVendaDataInicio, setFiltroVendaDataInicio] = useState("");
+  const [filtroVendaDataFim, setFiltroVendaDataFim] = useState("");
   const [filtroVendaVendedor, setFiltroVendaVendedor] = useState("");
   const [filtroVendaCidade, setFiltroVendaCidade] = useState("");
+  
   const [filtroEstoque, setFiltroEstoque] = useState("");
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -356,9 +358,23 @@ export default function AdminDashboard() {
   // AGRUPAMENTOS E FILTROS 
   // ==========================================
   
-  // 🚀 FILTRO DE VENDAS
+  // 🚀 FILTRO DE VENDAS COM INTERVALO DE DATAS
   const vendasFiltradas = vendasList.filter(venda => {
-    const matchData = filtroVendaData ? venda.created_at.startsWith(filtroVendaData) : true;
+    let matchData = true;
+    
+    if (filtroVendaDataInicio || filtroVendaDataFim) {
+      const dataVenda = new Date(venda.created_at);
+      
+      if (filtroVendaDataInicio) {
+        const start = new Date(filtroVendaDataInicio + 'T00:00:00');
+        if (dataVenda < start) matchData = false;
+      }
+      if (filtroVendaDataFim) {
+        const end = new Date(filtroVendaDataFim + 'T23:59:59');
+        if (dataVenda > end) matchData = false;
+      }
+    }
+
     const matchVendedor = filtroVendaVendedor ? venda.vendedor_nome.toLowerCase().includes(filtroVendaVendedor.toLowerCase()) : true;
     const matchCidade = filtroVendaCidade ? venda.cidade?.nome.toLowerCase().includes(filtroVendaCidade.toLowerCase()) : true;
     return matchData && matchVendedor && matchCidade;
@@ -444,11 +460,15 @@ export default function AdminDashboard() {
             {abaAtiva === 'vendas' && (
               <div className="space-y-8">
                 
-                {/* FILTROS DE VENDA */}
-                <div className="bg-zinc-900/40 border border-white/5 rounded-3xl p-5 sm:p-6 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {/* FILTROS DE VENDA ATUALIZADOS */}
+                <div className="bg-zinc-900/40 border border-white/5 rounded-3xl p-5 sm:p-6 grid grid-cols-1 sm:grid-cols-4 gap-4">
                   <div>
-                    <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-2 block">Filtrar por Data</label>
-                    <input type="date" value={filtroVendaData} onChange={e => setFiltroVendaData(e.target.value)} className="w-full bg-black/50 border border-white/10 focus:border-pink-500 rounded-xl h-12 px-4 text-sm text-white outline-none [color-scheme:dark]" />
+                    <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-2 block">Data Inicial</label>
+                    <input type="date" value={filtroVendaDataInicio} onChange={e => setFiltroVendaDataInicio(e.target.value)} className="w-full bg-black/50 border border-white/10 focus:border-pink-500 rounded-xl h-12 px-4 text-sm text-white outline-none [color-scheme:dark]" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-2 block">Data Final</label>
+                    <input type="date" value={filtroVendaDataFim} onChange={e => setFiltroVendaDataFim(e.target.value)} className="w-full bg-black/50 border border-white/10 focus:border-pink-500 rounded-xl h-12 px-4 text-sm text-white outline-none [color-scheme:dark]" />
                   </div>
                   <div>
                     <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold mb-2 block">Vendedor (Nome)</label>
