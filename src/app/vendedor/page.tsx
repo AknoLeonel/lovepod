@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 
-const SENHA_VENDEDOR = "vendas2026"; // 🔐 Defina a senha dos vendedores aqui
+const SENHA_VENDEDOR = "lovevendas2026"; // 🔐 Defina a senha dos vendedores aqui
 
 export default function VendedorLogin() {
   const [nome, setNome] = useState("");
