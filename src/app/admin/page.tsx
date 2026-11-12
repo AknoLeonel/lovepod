@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
-import { formatBRL, parsePreco, escapeLike } from '@/lib/format';
+import { formatBRL, formatPrecoInput, parsePreco, escapeLike } from '@/lib/format';
 import Link from 'next/link';
 
 const SENHA_ADMIN = "lovepod2026"; 
@@ -51,7 +51,30 @@ export default function AdminDashboard() {
   const [formSabor, setFormSabor] = useState({ produto_id: '', nome: '' });
 
   const [isAddCidadeModalOpen, setIsAddCidadeModalOpen] = useState(false);
-  const [formCidade, setFormCidade] = useState({ nome: '' });
+  const [formCidade, setFormCidade] = useState<{ id?: number; nome: string }>({ nome: '' });
+
+  // Preço do produto por cidade (vazio = usa o preço padrão)
+  const [precosList, setPrecosList] = useState<{ produto_id: number; cidade_id: number; preco: number }[]>([]);
+  const [precosCidade, setPrecosCidade] = useState<Record<number, string>>({});
+
+  const precosPorProduto = useMemo(() => {
+    const mapa = new Map<number, typeof precosList>();
+    for (const pp of precosList) mapa.set(pp.produto_id, [...(mapa.get(pp.produto_id) ?? []), pp]);
+    return mapa;
+  }, [precosList]);
+
+  // Números de cada cidade para os cards da aba Cidades (calculados uma vez por carga)
+  const resumoPorCidade = useMemo(() => {
+    const mapa = new Map<number, { unidades: number; precos: number; vendas: number }>();
+    const pegar = (id: number) => {
+      if (!mapa.has(id)) mapa.set(id, { unidades: 0, precos: 0, vendas: 0 });
+      return mapa.get(id)!;
+    };
+    for (const e of estoque) pegar(e.cidade_id).unidades += e.quantidade;
+    for (const pp of precosList) pegar(pp.cidade_id).precos += 1;
+    for (const v of vendasList) pegar(v.cidade_id).vendas += 1;
+    return mapa;
+  }, [estoque, precosList, vendasList]);
 
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
   const [produtoImage, setProdutoImage] = useState<any>(null);
@@ -116,19 +139,21 @@ export default function AdminDashboard() {
       }
     };
 
-    const [resEstoque, resCidades, resProdutos, resSabores, resVendas] = await Promise.all([
+    const [resEstoque, resCidades, resProdutos, resSabores, resVendas, resPrecos] = await Promise.all([
       supabase.from('estoque').select(`id, quantidade, cidade_id, produto_id, sabor_id, cidade:cidades(nome), produto:produtos(nome), sabor:sabores(nome)`).order('cidade_id'),
       supabase.from('cidades').select('*').order('nome'),
       supabase.from('produtos').select('*').order('nome'),
       supabase.from('sabores').select('*, produto:produtos(nome)').order('nome'),
-      carregarTodasVendas()
+      carregarTodasVendas(),
+      supabase.from('produto_precos').select('produto_id, cidade_id, preco')
     ]);
 
-    const falha = [resEstoque, resCidades, resProdutos, resSabores, resVendas].find(r => r.error);
+    const falha = [resEstoque, resCidades, resProdutos, resSabores, resVendas, resPrecos].find(r => r.error);
     setErroCarga(falha?.error ? falha.error.message : "");
 
     if (resEstoque.data) setEstoque(resEstoque.data);
     if (resCidades.data) setCidadesList(resCidades.data);
+    if (resPrecos.data) setPrecosList(resPrecos.data);
     if (resProdutos.data) setProdutosList(resProdutos.data);
     if (resSabores.data) setSaboresList(resSabores.data);
     if (resVendas.data) setVendasList(resVendas.data);
@@ -175,24 +200,56 @@ export default function AdminDashboard() {
   };
 
   // 🚀 NOVO: Salvar a edição do PRODUTO (Valor, Nome, etc)
+  const abrirEdicaoProduto = (p: any) => {
+    setProdutoEditando(p);
+    setEditFormProduto({ nome: p.nome, descricao: p.descricao || '', preco: formatPrecoInput(p.preco) });
+    const atuais: Record<number, string> = {};
+    for (const pp of precosPorProduto.get(p.id) ?? []) atuais[pp.cidade_id] = formatPrecoInput(pp.preco);
+    setPrecosCidade(atuais);
+    setIsEditProdutoModalOpen(true);
+  };
+
   const salvarEdicaoProduto = async () => {
-    if (!editFormProduto.nome || !editFormProduto.preco) return alert("Nome e Preço são obrigatórios.");
+    if (!editFormProduto.nome.trim() || !editFormProduto.preco) return alert("Nome e Preço são obrigatórios.");
     const precoFormatado = parsePreco(editFormProduto.preco);
-    if (precoFormatado === null) return alert("Preço inválido. Use o formato 85,00.");
-    setSalvando(true);
-    const { error } = await supabase.from('produtos').update({
-      nome: editFormProduto.nome,
-      descricao: editFormProduto.descricao,
-      preco: precoFormatado
-    }).eq('id', produtoEditando.id);
-    
-    if (!error) { 
-      setIsEditProdutoModalOpen(false); 
-      carregarDados(); 
-    } else {
-      alert("Erro ao atualizar o produto: " + error.message);
+    if (precoFormatado === null) return alert("Preço padrão inválido. Use o formato 85,00.");
+
+    // Valida todos os preços por cidade antes de gravar qualquer coisa
+    const comPreco: { produto_id: number; cidade_id: number; preco: number }[] = [];
+    const semPreco: number[] = [];
+    for (const cidade of cidadesList) {
+      const texto = (precosCidade[cidade.id] ?? '').trim();
+      if (!texto) { semPreco.push(cidade.id); continue; }
+      const valor = parsePreco(texto);
+      if (valor === null) return alert(`Preço inválido para ${cidade.nome}. Use o formato 85,00 ou deixe em branco para usar o preço padrão.`);
+      comPreco.push({ produto_id: produtoEditando.id, cidade_id: cidade.id, preco: valor });
     }
+
+    const salvar = async () => {
+      const { error } = await supabase.from('produtos').update({
+        nome: editFormProduto.nome.trim(),
+        descricao: editFormProduto.descricao,
+        preco: precoFormatado
+      }).eq('id', produtoEditando.id);
+      if (error) return `Nada foi salvo. ${error.message}`;
+
+      if (comPreco.length > 0) {
+        const { error: errPrecos } = await supabase.from('produto_precos').upsert(comPreco, { onConflict: 'produto_id,cidade_id' });
+        if (errPrecos) return `Nome, descrição e preço padrão foram salvos, mas os preços por cidade não. Abra o pod e salve de novo. ${errPrecos.message}`;
+      }
+      if (semPreco.length > 0) {
+        const { error: errLimpa } = await supabase.from('produto_precos').delete().eq('produto_id', produtoEditando.id).in('cidade_id', semPreco);
+        if (errLimpa) return `Quase tudo foi salvo, mas alguns preços por cidade apagados continuam valendo. Abra o pod e salve de novo. ${errLimpa.message}`;
+      }
+      return null;
+    };
+
+    setSalvando(true);
+    const falha = await salvar();
     setSalvando(false);
+    if (falha) { alert("Erro ao atualizar o produto: " + falha); carregarDados(); return; }
+    setIsEditProdutoModalOpen(false);
+    carregarDados();
   };
 
   const salvarNovoSabor = async () => {
@@ -217,12 +274,56 @@ export default function AdminDashboard() {
     setSalvando(false);
   };
 
-  const salvarNovaCidade = async () => {
-    if (!formCidade.nome) return alert("Digite o nome da cidade.");
+  // Cria ou renomeia (formCidade.id preenchido = edição)
+  const salvarCidade = async () => {
+    const nome = formCidade.nome.trim();
+    if (!nome) return alert("Digite o nome da cidade.");
+    const mesmoNome = cidadesList.find(c => c.id !== formCidade.id && c.nome.toLowerCase() === nome.toLowerCase());
+    if (mesmoNome && mesmoNome.ativa) return alert(`Já existe uma cidade chamada ${mesmoNome.nome}.`);
+    if (mesmoNome && !formCidade.id) {
+      // Cidade oculta com o mesmo nome: reativa em vez de duplicar
+      if (!confirm(`${mesmoNome.nome} já existe e está oculta. Reativar ela?`)) return;
+      return alterarVisibilidadeCidade(mesmoNome, true).then(() => setIsAddCidadeModalOpen(false));
+    }
+    if (mesmoNome) return alert(`Já existe uma cidade oculta chamada ${mesmoNome.nome}. Reative ela em vez de renomear esta.`);
+
     setSalvando(true);
-    const { error } = await supabase.from('cidades').insert([{ nome: formCidade.nome }]);
-    if (!error) { setIsAddCidadeModalOpen(false); setFormCidade({nome: ''}); carregarDados(); } else alert("Erro: " + error.message);
+    const { error } = formCidade.id
+      ? await supabase.from('cidades').update({ nome }).eq('id', formCidade.id)
+      : await supabase.from('cidades').insert([{ nome }]);
     setSalvando(false);
+    if (error) return alert("Erro ao salvar a cidade: " + error.message);
+    setIsAddCidadeModalOpen(false); setFormCidade({ nome: '' }); carregarDados();
+  };
+
+  const alterarVisibilidadeCidade = async (cidade: any, ativa: boolean) => {
+    setLoading(true);
+    const { error } = await supabase.from('cidades').update({ ativa }).eq('id', cidade.id);
+    if (error) alert("Erro ao atualizar a cidade: " + error.message);
+    carregarDados();
+  };
+
+  // Cidade sem vendas é apagada de vez (com o estoque dela). Com vendas, é
+  // ocultada, para não perder o histórico do caixa.
+  const excluirCidade = async (cidade: any) => {
+    const { count: qtdVendas, error: errConta } = await supabase.from('vendas').select('id', { count: 'exact', head: true }).eq('cidade_id', cidade.id);
+    if (errConta) return alert("Não foi possível verificar as vendas da cidade: " + errConta.message);
+
+    if ((qtdVendas ?? 0) > 0) {
+      if (!cidade.ativa) return alert(`${cidade.nome} já está oculta. Ela tem ${qtdVendas} venda(s) no histórico e por isso não pode ser apagada.`);
+      if (!confirm(`${cidade.nome} tem ${qtdVendas} venda(s) no histórico, que seriam perdidas se ela fosse apagada.\n\nEla será OCULTADA: some do site e do PDV, mas o histórico de vendas continua no caixa. Você pode reativar depois.\n\nContinuar?`)) return;
+      return alterarVisibilidadeCidade(cidade, false);
+    }
+
+    const unidades = resumoPorCidade.get(cidade.id)?.unidades ?? 0;
+    if (!confirm(`Apagar ${cidade.nome} definitivamente?${unidades > 0 ? `\n\nO estoque dela (${unidades} un.) também será apagado.` : ''}\n\nIsso não pode ser desfeito.`)) return;
+
+    setLoading(true);
+    // O banco apaga o estoque e os preços da cidade junto (on delete cascade).
+    // Se surgiu uma venda nesse meio tempo, ele recusa e nada é apagado.
+    const { error } = await supabase.from('cidades').delete().eq('id', cidade.id);
+    if (error) alert("Não foi possível apagar a cidade (ela pode ter recebido uma venda agora). Tente ocultar.\n\nDetalhes: " + error.message);
+    carregarDados();
   };
 
   const salvarImagemProduto = async () => {
@@ -588,7 +689,7 @@ export default function AdminDashboard() {
                 <div><h2 className="text-2xl font-black text-white">Scanner de Lote</h2><p className="text-zinc-400 text-sm mt-1">Cole a lista do WhatsApp. O sistema cria e atualiza sozinho.</p></div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="bg-zinc-900/40 border border-white/5 p-6 rounded-3xl space-y-6">
-                    <div className="space-y-2"><label className="text-xs font-bold text-zinc-400 uppercase tracking-widest">1. Cidade</label><select className="w-full bg-black/50 border border-white/10 rounded-2xl h-14 px-5 font-semibold text-white focus:border-pink-500 outline-none" value={cityImport} onChange={(e) => setCityImport(e.target.value)}><option value="">-- Escolha --</option>{cidadesList.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}</select></div>
+                    <div className="space-y-2"><label className="text-xs font-bold text-zinc-400 uppercase tracking-widest">1. Cidade</label><select className="w-full bg-black/50 border border-white/10 rounded-2xl h-14 px-5 font-semibold text-white focus:border-pink-500 outline-none" value={cityImport} onChange={(e) => setCityImport(e.target.value)}><option value="">-- Escolha --</option>{cidadesList.filter(c => c.ativa).map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}</select></div>
                     <div className="space-y-2"><label className="text-xs font-bold text-zinc-400 uppercase tracking-widest">2. Texto do WhatsApp</label><textarea className="w-full bg-black/50 border border-white/10 rounded-2xl p-5 text-sm font-mono text-zinc-300 focus:border-pink-500 outline-none custom-scrollbar" rows={10} value={textImport} onChange={(e) => setTextImport(e.target.value)} /></div>
                     <button onClick={processarLoteWhatsApp} disabled={isImporting} className="w-full bg-gradient-to-r from-pink-600 to-rose-500 text-white font-black uppercase tracking-widest h-14 rounded-2xl transition-all active:scale-95 disabled:opacity-50">{isImporting ? 'Lendo...' : 'Processar Estoque'}</button>
                   </div>
@@ -688,7 +789,7 @@ export default function AdminDashboard() {
                         <th className="px-6 py-5 w-20 text-center">Imagem</th>
                         <th className="px-6 py-5">Marca/Modelo</th>
                         <th className="px-6 py-5">Descrição</th>
-                        <th className="px-6 py-5 text-right">Valor Venda</th>
+                        <th className="px-6 py-5 text-right">Preço</th>
                         <th className="px-6 py-5 w-24 text-center">Ações</th>
                       </tr>
                     </thead>
@@ -703,17 +804,26 @@ export default function AdminDashboard() {
                           </td>
                           <td className="px-6 py-5 font-black text-white">{p.nome}</td>
                           <td className="px-6 py-5 text-zinc-400 text-xs truncate max-w-[150px]">{p.descricao || 'Sem descrição'}</td>
-                          <td className="px-6 py-5 text-pink-400 font-bold text-right">{formatBRL(p.preco)}</td>
+                          <td className="px-6 py-5 text-right">
+                            <p className="text-pink-400 font-bold">{formatBRL(p.preco)}</p>
+                            {(() => {
+                              const proprios = precosPorProduto.get(p.id) ?? [];
+                              if (proprios.length === 0) return <p className="text-[11px] text-zinc-500">mesmo preço em todas</p>;
+                              const valores = proprios.map(pp => Number(pp.preco));
+                              const min = Math.min(...valores), max = Math.max(...valores);
+                              return (
+                                <p className="text-[11px] text-amber-400" title={proprios.map(pp => `${cidadesList.find(c => c.id === pp.cidade_id)?.nome}: ${formatBRL(pp.preco)}`).join('\n')}>
+                                  {proprios.length} cidade{proprios.length > 1 ? 's' : ''} com preço próprio · {min === max ? formatBRL(min) : `${formatBRL(min)}–${formatBRL(max)}`}
+                                </p>
+                              );
+                            })()}
+                          </td>
                           <td className="px-6 py-5 text-center flex items-center justify-center gap-2">
-                            {/* 🚀 BOTÃO EDITAR PRODUTO */}
-                            <button 
-                              onClick={() => {
-                                setProdutoEditando(p);
-                                setEditFormProduto({ nome: p.nome, descricao: p.descricao || '', preco: (Number(p.preco) || 0).toFixed(2).replace('.', ',') });
-                                setIsEditProdutoModalOpen(true);
-                              }} 
-                              className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors" 
-                              title="Editar Valor/Info do Produto"
+                            <button
+                              onClick={() => abrirEdicaoProduto(p)}
+                              aria-label={`Editar ${p.nome}`}
+                              className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors"
+                              title="Editar nome, descrição e preços"
                             >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                             </button>
@@ -733,8 +843,45 @@ export default function AdminDashboard() {
             {/* ABA 4: CIDADES */}
             {abaAtiva === 'cidades' && (
               <div className="space-y-6">
-                <div className="flex justify-between items-center"><h2 className="text-lg font-black text-white">Praças de Atuação</h2><button onClick={() => {setFormCidade({nome: ''}); setIsAddCidadeModalOpen(true)}} className="bg-pink-600 text-white px-5 py-2.5 rounded-xl text-xs font-bold active:scale-95 shadow-[0_0_15px_rgba(236,72,153,0.3)]">+ Nova Praça</button></div>
-                <div className="bg-zinc-900/40 border border-white/5 rounded-3xl overflow-hidden overflow-x-auto custom-scrollbar"><table className="w-full text-left text-sm whitespace-nowrap"><thead className="bg-black/40 text-zinc-400 uppercase font-black text-[10px] tracking-[0.2em]"><tr><th className="px-6 py-5">Nome da Cidade</th></tr></thead><tbody className="divide-y divide-white/5">{cidadesList.map((c: any) => (<tr key={c.id} className="hover:bg-zinc-800/40"><td className="px-6 py-5 font-black text-white text-lg">{c.nome}</td></tr>))}</tbody></table></div>
+                <div className="flex flex-wrap justify-between items-center gap-3">
+                  <div>
+                    <h2 className="text-lg font-black text-white">Praças de Atuação</h2>
+                    <p className="text-zinc-400 text-sm mt-1">Os preços por cidade são definidos na aba Produtos, no botão de editar de cada pod.</p>
+                  </div>
+                  <button onClick={() => {setFormCidade({nome: ''}); setIsAddCidadeModalOpen(true)}} className="bg-pink-600 hover:bg-pink-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold active:scale-95 shadow-[0_0_15px_rgba(236,72,153,0.3)]">+ Nova Praça</button>
+                </div>
+
+                {cidadesList.length === 0 ? (
+                  <div className="p-10 text-center bg-zinc-900/30 border border-white/5 rounded-3xl text-zinc-400">Nenhuma cidade cadastrada.</div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {cidadesList.map((c: any) => {
+                      const { unidades = 0, precos: precosProprios = 0, vendas: vendasDaCidade = 0 } = resumoPorCidade.get(c.id) ?? {};
+                      return (
+                        <div key={c.id} className={`border rounded-3xl p-5 flex flex-col gap-4 ${c.ativa ? 'bg-zinc-900/40 border-white/5' : 'bg-zinc-950 border-dashed border-white/10'}`}>
+                          <div className="flex justify-between items-start gap-3">
+                            <h3 className={`text-xl font-black leading-tight break-words ${c.ativa ? 'text-white' : 'text-zinc-500'}`}>{c.nome}</h3>
+                            {c.ativa
+                              ? <span className="shrink-0 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md bg-green-500/10 text-green-400 border border-green-500/20">No site</span>
+                              : <span className="shrink-0 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-md bg-zinc-800 text-zinc-400 border border-white/10">Oculta</span>}
+                          </div>
+                          <dl className="grid grid-cols-3 gap-2 text-center">
+                            <div className="bg-black/40 rounded-xl py-2"><dt className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">Estoque</dt><dd className="text-white font-black">{unidades}</dd></div>
+                            <div className="bg-black/40 rounded-xl py-2"><dt className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">Preços</dt><dd className="text-white font-black">{precosProprios}</dd></div>
+                            <div className="bg-black/40 rounded-xl py-2"><dt className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">Vendas</dt><dd className="text-white font-black">{vendasDaCidade}</dd></div>
+                          </dl>
+                          <div className="flex gap-2 mt-auto">
+                            <button onClick={() => { setFormCidade({ id: c.id, nome: c.nome }); setIsAddCidadeModalOpen(true); }} className="flex-1 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-bold transition-colors">Editar nome</button>
+                            <button onClick={() => alterarVisibilidadeCidade(c, !c.ativa)} className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-colors ${c.ativa ? 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300' : 'bg-green-500/15 hover:bg-green-500/25 text-green-400'}`}>{c.ativa ? 'Ocultar' : 'Reativar'}</button>
+                            <button onClick={() => excluirCidade(c)} aria-label={`Excluir ${c.nome}`} title="Excluir cidade" className="px-3 rounded-xl bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white transition-colors">
+                              <svg aria-hidden="true" className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </>
@@ -839,26 +986,56 @@ export default function AdminDashboard() {
 
       {/* 🚀 NOVO MODAL: EDITAR PRODUTO (VALOR/NOME) */}
       {isEditProdutoModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-[#0a0a0a] border border-white/10 rounded-[2.5rem] w-full max-w-sm p-8 space-y-6 shadow-2xl animate-in zoom-in-95 duration-300">
-            <h3 className="text-xl font-black text-white text-center">Editar Pod</h3>
+        <div role="dialog" aria-modal="true" aria-labelledby="titulo-editar-pod" className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-end sm:items-center justify-center sm:p-4">
+          <div className="bg-surface-raised border border-white/10 rounded-t-[2.5rem] sm:rounded-[2.5rem] w-full max-w-md p-6 sm:p-8 space-y-6 shadow-2xl animate-in slide-in-from-bottom-10 sm:zoom-in-95 duration-300 max-h-[92vh] overflow-y-auto custom-scrollbar">
+            <h3 id="titulo-editar-pod" className="text-xl font-black text-white text-center">Editar Pod</h3>
             <div className="space-y-4">
               <div className="space-y-1">
-                <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-2">Marca / Nome</label>
-                <input type="text" placeholder="Marca / Nome" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={editFormProduto.nome} onChange={(e) => setEditFormProduto({...editFormProduto, nome: e.target.value})} />
+                <label htmlFor="pod-nome" className="text-[11px] uppercase tracking-widest text-zinc-400 font-bold ml-2">Marca / Nome</label>
+                <input id="pod-nome" type="text" placeholder="Marca / Nome" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={editFormProduto.nome} onChange={(e) => setEditFormProduto({...editFormProduto, nome: e.target.value})} />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-2">Descrição</label>
-                <input type="text" placeholder="Puffs, Nicotina, etc" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={editFormProduto.descricao} onChange={(e) => setEditFormProduto({...editFormProduto, descricao: e.target.value})} />
+                <label htmlFor="pod-descricao" className="text-[11px] uppercase tracking-widest text-zinc-400 font-bold ml-2">Descrição</label>
+                <input id="pod-descricao" type="text" placeholder="Puffs, Nicotina, etc" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={editFormProduto.descricao} onChange={(e) => setEditFormProduto({...editFormProduto, descricao: e.target.value})} />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-2">Preço (R$)</label>
-                <input type="text" placeholder="Ex: 85,00" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={editFormProduto.preco} onChange={(e) => setEditFormProduto({...editFormProduto, preco: e.target.value})} />
+                <label htmlFor="pod-preco" className="text-[11px] uppercase tracking-widest text-zinc-400 font-bold ml-2">Preço padrão (R$)</label>
+                <input id="pod-preco" type="text" inputMode="decimal" placeholder="Ex: 85,00" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={editFormProduto.preco} onChange={(e) => setEditFormProduto({...editFormProduto, preco: e.target.value})} />
+                <p className="text-[11px] text-zinc-500 ml-2">Vale para todas as cidades sem preço próprio.</p>
               </div>
             </div>
+
+            {cidadesList.length > 0 && (
+              <fieldset className="bg-black/30 border border-white/5 rounded-3xl p-4 sm:p-5 space-y-3">
+                <legend className="px-2 text-[11px] uppercase tracking-widest text-pink-400 font-black">Preço por cidade</legend>
+                <p className="text-xs text-zinc-400">Deixe em branco para usar o preço padrão.</p>
+                {cidadesList.map((c: any) => {
+                  const texto = precosCidade[c.id] ?? '';
+                  const invalido = texto.trim() !== '' && parsePreco(texto) === null;
+                  return (
+                    <div key={c.id} className="flex items-center gap-3">
+                      <label htmlFor={`preco-cidade-${c.id}`} className={`flex-1 min-w-0 text-sm font-bold truncate ${c.ativa ? 'text-white' : 'text-zinc-500'}`}>
+                        {c.nome}{!c.ativa && <span className="ml-2 text-[10px] uppercase text-zinc-500">(oculta)</span>}
+                      </label>
+                      <input
+                        id={`preco-cidade-${c.id}`}
+                        type="text"
+                        inputMode="decimal"
+                        aria-invalid={invalido}
+                        placeholder={editFormProduto.preco || 'padrão'}
+                        value={texto}
+                        onChange={(e) => setPrecosCidade(prev => ({ ...prev, [c.id]: e.target.value }))}
+                        className={`w-28 bg-zinc-900 border rounded-xl h-11 px-3 text-right text-sm text-white placeholder:text-zinc-600 outline-none ${invalido ? 'border-red-500' : texto.trim() ? 'border-amber-500/50 focus:border-pink-500' : 'border-white/10 focus:border-pink-500'}`}
+                      />
+                    </div>
+                  );
+                })}
+              </fieldset>
+            )}
+
             <div className="flex gap-3">
-              <button onClick={() => setIsEditProdutoModalOpen(false)} className="flex-1 py-3 rounded-xl bg-zinc-800 text-white font-bold text-sm">Cancelar</button>
-              <button onClick={salvarEdicaoProduto} disabled={salvando} className="flex-1 py-3 rounded-xl bg-pink-600 text-white font-bold text-sm">{salvando ? 'Salvando...' : 'Atualizar Pod'}</button>
+              <button onClick={() => setIsEditProdutoModalOpen(false)} className="flex-1 py-3.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-sm">Cancelar</button>
+              <button onClick={salvarEdicaoProduto} disabled={salvando} className="flex-1 py-3.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-bold text-sm disabled:opacity-50">{salvando ? 'Salvando...' : 'Salvar'}</button>
             </div>
           </div>
         </div>
@@ -883,7 +1060,7 @@ export default function AdminDashboard() {
           <div className="bg-[#0a0a0a] border border-white/10 rounded-[2.5rem] w-full max-w-sm p-8 space-y-6 animate-in zoom-in-95 duration-300">
             <h3 className="text-xl font-black text-white text-center">Nova Entrada</h3>
             <div className="space-y-4">
-              <select className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formEstoque.cidade_id} onChange={(e) => setFormEstoque({...formEstoque, cidade_id: e.target.value})}><option value="">Selecione a Cidade</option>{cidadesList.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}</select>
+              <select className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formEstoque.cidade_id} onChange={(e) => setFormEstoque({...formEstoque, cidade_id: e.target.value})}><option value="">Selecione a Cidade</option>{cidadesList.filter(c => c.ativa).map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}</select>
               <select className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formEstoque.produto_id} onChange={(e) => setFormEstoque({...formEstoque, produto_id: e.target.value})}><option value="">Selecione o Produto</option>{produtosList.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}</select>
               <select className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formEstoque.sabor_id} onChange={(e) => setFormEstoque({...formEstoque, sabor_id: e.target.value})}><option value="">Selecione o Sabor</option>{saboresList.filter(s => s.produto_id.toString() === formEstoque.produto_id).map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}</select>
               <input type="number" min="1" aria-label="Quantidade" placeholder="Quantidade" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formEstoque.quantidade} onChange={(e) => setFormEstoque({...formEstoque, quantidade: parseInt(e.target.value) || 0})} />
@@ -921,14 +1098,15 @@ export default function AdminDashboard() {
       )}
 
       {isAddCidadeModalOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-[#0a0a0a] border border-white/10 rounded-[2.5rem] w-full max-w-sm p-8 space-y-6 animate-in zoom-in-95 duration-300">
-            <h3 className="text-xl font-black text-white text-center">Nova Praça</h3>
-            <div className="space-y-4">
-              <input type="text" placeholder="Nome da Cidade" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formCidade.nome} onChange={(e) => setFormCidade({...formCidade, nome: e.target.value})} />
+        <div role="dialog" aria-modal="true" aria-labelledby="titulo-cidade" className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <form onSubmit={(e) => { e.preventDefault(); salvarCidade(); }} className="bg-surface-raised border border-white/10 rounded-[2.5rem] w-full max-w-sm p-8 space-y-6 animate-in zoom-in-95 duration-300">
+            <h3 id="titulo-cidade" className="text-xl font-black text-white text-center">{formCidade.id ? 'Editar Praça' : 'Nova Praça'}</h3>
+            <div className="space-y-1">
+              <label htmlFor="cidade-nome" className="text-[11px] uppercase tracking-widest text-zinc-400 font-bold ml-2">Nome da cidade</label>
+              <input id="cidade-nome" type="text" autoFocus placeholder="Ex: Formosa" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formCidade.nome} onChange={(e) => setFormCidade({...formCidade, nome: e.target.value})} />
             </div>
-            <div className="flex gap-3"><button onClick={() => setIsAddCidadeModalOpen(false)} className="flex-1 py-3 rounded-xl bg-zinc-800 text-white font-bold text-sm">Cancelar</button><button onClick={salvarNovaCidade} disabled={salvando} className="flex-1 py-3 rounded-xl bg-pink-600 text-white font-bold text-sm">{salvando ? '...' : 'Salvar'}</button></div>
-          </div>
+            <div className="flex gap-3"><button type="button" onClick={() => setIsAddCidadeModalOpen(false)} className="flex-1 py-3.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-sm">Cancelar</button><button type="submit" disabled={salvando} className="flex-1 py-3.5 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-bold text-sm disabled:opacity-50">{salvando ? 'Salvando...' : 'Salvar'}</button></div>
+          </form>
         </div>
       )}
     </div>

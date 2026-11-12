@@ -145,10 +145,18 @@ export default function VendedorPDV({ params }: { params: Promise<{ cidadeId: st
     };
 
     try {
-      // 1. Lê o estoque atual de todos os itens
+      // 1. Confere se a cidade ainda está ativa e lê o estoque atual de todos os itens
       const ids = carrinho.map(c => c.estoqueId);
-      const { data: checkEstoque, error: errCheck } = await supabase.from('estoque').select('id, quantidade').in('id', ids);
+      const [{ data: cidadeAtiva, error: errCidade }, { data: checkEstoque, error: errCheck }] = await Promise.all([
+        supabase.from('cidades').select('id').eq('id', cidadeId).eq('ativa', true).maybeSingle(),
+        supabase.from('estoque').select('id, quantidade').in('id', ids),
+      ]);
+      if (errCidade) throw errCidade;
       if (errCheck) throw errCheck;
+      if (!cidadeAtiva) {
+        setErroVenda("Esta cidade foi desativada pelo administrador. Nenhuma venda foi registrada.");
+        return;
+      }
 
       // 2. Dá baixa item a item. O filtro pela quantidade lida garante que, se outro
       //    vendedor mexeu no mesmo estoque nesse meio tempo, nada é gravado.
@@ -234,6 +242,16 @@ export default function VendedorPDV({ params }: { params: Promise<{ cidadeId: st
   }
 
   if (loading) return <div className="min-h-screen bg-surface flex items-center justify-center"><div className="w-12 h-12 border-4 border-pink-500/20 border-t-pink-500 rounded-full animate-spin" /></div>;
+
+  // Cidade apagada ou oculta pelo admin: não deixa vender nela
+  if (!erroCarga && !cidade) {
+    return (
+      <div className="min-h-screen bg-surface text-zinc-400 flex flex-col items-center justify-center gap-4 p-6 text-center">
+        <p className="text-white font-bold">Esta cidade não está disponível para vendas.</p>
+        <Link href="/vendedor/cidades" className="px-6 py-3 bg-zinc-900 hover:bg-pink-600 rounded-full text-white font-bold transition-colors">Escolher outra cidade</Link>
+      </div>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-surface text-zinc-100 pb-32 relative overflow-hidden">
