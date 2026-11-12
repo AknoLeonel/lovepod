@@ -26,7 +26,7 @@ export default function VendedorCidades() {
 
     // 2. Puxa as cidades do banco
     async function carregarCidades() {
-      const { data, error } = await supabase.from("cidades").select("*").order("nome");
+      const { data, error } = await supabase.from("cidades").select("*").eq("ativa", true).order("nome");
       setErro(!!error);
       if (data) setCidades(data);
       setLoading(false);

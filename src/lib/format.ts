@@ -16,6 +16,12 @@ export function parsePreco(texto: string | number): number | null {
   return Number.isFinite(valor) && valor >= 0 ? valor : null;
 }
 
+/** Valor para preencher um campo de preço editável: 85 → "85,00". */
+export function formatPrecoInput(valor: number | string | null | undefined): string {
+  const n = Number(valor);
+  return (Number.isFinite(n) ? n : 0).toFixed(2).replace('.', ',');
+}
+
 /** Escapa os curingas do LIKE/ILIKE para comparar o texto literalmente. */
 export function escapeLike(texto: string): string {
   return texto.replace(/[\\%_]/g, (c) => `\\${c}`);

@@ -33,7 +33,8 @@ export const revalidate = 60;
 export default async function Home() {
   const { data: cidades, error } = await supabase
     .from('cidades')
-    .select('*')
+    .select('id, nome')
+    .eq('ativa', true)
     .order('nome');
 
   return (
