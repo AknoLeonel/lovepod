@@ -73,7 +73,7 @@ export default async function Home() {
         </header>
 
         {/* 🏙️ LISTA DE CIDADES (Cartões Interativos) */}
-        <nav className="w-full flex flex-col gap-4">
+        <nav aria-label="Cidades atendidas" className="w-full flex flex-col gap-4">
           {error ? (
             <div className="p-5 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-400 text-sm backdrop-blur-md animate-in zoom-in-95">
               <p className="font-bold">Sistema temporariamente indisponível.</p>
@@ -88,12 +88,12 @@ export default async function Home() {
               <Link 
                 key={cidade.id} 
                 href={`/catalogo/${cidade.id}`}
-                className="group relative w-full flex items-center justify-between px-6 py-5 sm:py-6 bg-zinc-900/40 backdrop-blur-xl border border-white/5 hover:border-pink-500/40 rounded-[2rem] transition-all duration-500 hover:shadow-[0_0_40px_rgba(236,72,153,0.15)] overflow-hidden active:scale-[0.97] opacity-0 animate-[fade-in-up_0.6s_ease-out_forwards]"
-                style={{ animationDelay: `${index * 150}ms` }} // Efeito cascata lindo
+                className="group relative w-full flex items-center justify-between px-6 py-5 sm:py-6 bg-zinc-900/40 backdrop-blur-xl border border-white/5 hover:border-pink-500/40 rounded-[2rem] transition-all duration-500 hover:shadow-[0_0_40px_rgba(236,72,153,0.15)] overflow-hidden active:scale-[0.97] animate-fade-in-up"
+                style={{ animationDelay: `${index * 150}ms` }}
               >
                 {/* Efeito de hover interno brilhante */}
                 <div className="absolute inset-0 bg-gradient-to-r from-pink-500/0 via-pink-500/10 to-pink-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-700 pointer-events-none" />
-                <div className="absolute -inset-[100%] bg-gradient-to-r from-transparent via-white/5 to-transparent rotate-45 group-hover:animate-shine pointer-events-none" />
+                <div className="absolute -inset-[100%] bg-gradient-to-r from-transparent via-white/5 to-transparent group-hover:animate-shine pointer-events-none" />
                 
                 <span className="relative text-lg sm:text-xl font-bold text-zinc-300 group-hover:text-white transition-colors tracking-wide z-10">
                   {cidade.nome}
@@ -116,7 +116,7 @@ export default async function Home() {
         </nav>
 
         {/* 🔞 FOOTER MINIMALISTA */}
-        <footer className="pt-8 w-full flex flex-col items-center gap-4 opacity-50 hover:opacity-100 transition-opacity duration-300">
+        <footer className="pt-8 w-full flex flex-col items-center gap-4">
           <div className="h-px bg-gradient-to-r from-transparent via-zinc-700 to-transparent w-full max-w-[200px]" />
           <p className="text-[10px] uppercase tracking-[0.2em] text-zinc-400 font-bold flex items-center gap-2 bg-black/50 px-4 py-2 rounded-full border border-white/5">
             <span className="text-xs">🔞</span> Proibido para menores de 18 anos
@@ -124,18 +124,6 @@ export default async function Home() {
         </footer>
         
       </div>
-
-      {/* Estilos customizados para as animações locais */}
-      <style dangerouslySetInnerHTML={{__html: `
-        @keyframes fade-in-up {
-          0% { opacity: 0; transform: translateY(20px); }
-          100% { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes shine {
-          0% { transform: translateX(-100%) rotate(45deg); }
-          100% { transform: translateX(100%) rotate(45deg); }
-        }
-      `}} />
     </main>
   );
 }
