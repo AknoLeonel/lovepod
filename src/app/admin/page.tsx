@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '@/lib/supabase';
+import { formatBRL, parsePreco, escapeLike } from '@/lib/format';
 import Link from 'next/link';
 
 const SENHA_ADMIN = "lovepod2026"; 
@@ -12,6 +13,7 @@ export default function AdminDashboard() {
   const [erroSenha, setErroSenha] = useState(false);
   const [verificandoSessao, setVerificandoSessao] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [erroCarga, setErroCarga] = useState("");
 
   const [abaAtiva, setAbaAtiva] = useState<'vendas' | 'estoque' | 'produtos' | 'sabores' | 'cidades' | 'importacao'>('vendas');
 
@@ -99,13 +101,31 @@ export default function AdminDashboard() {
     setLoading(true);
     
     // Atualizado para puxar IDs necessários nas vendas para podermos devolver o estoque
+    // O Supabase devolve no máximo 1000 linhas por consulta: busca as vendas em páginas até acabar
+    const carregarTodasVendas = async () => {
+      const TAMANHO = 1000;
+      const todas: any[] = [];
+      for (let inicio = 0; ; inicio += TAMANHO) {
+        const { data, error } = await supabase.from('vendas')
+          .select(`id, quantidade, valor_total, metodo_pagamento, vendedor_nome, created_at, cidade_id, produto_id, sabor_id, cidade:cidades(nome), produto:produtos(nome), sabor:sabores(nome)`)
+          .order('created_at', { ascending: false }).order('id', { ascending: false })
+          .range(inicio, inicio + TAMANHO - 1);
+        if (error) return { data: null, error };
+        todas.push(...data);
+        if (data.length < TAMANHO) return { data: todas, error: null };
+      }
+    };
+
     const [resEstoque, resCidades, resProdutos, resSabores, resVendas] = await Promise.all([
       supabase.from('estoque').select(`id, quantidade, cidade_id, produto_id, sabor_id, cidade:cidades(nome), produto:produtos(nome), sabor:sabores(nome)`).order('cidade_id'),
       supabase.from('cidades').select('*').order('nome'),
       supabase.from('produtos').select('*').order('nome'),
       supabase.from('sabores').select('*, produto:produtos(nome)').order('nome'),
-      supabase.from('vendas').select(`id, quantidade, valor_total, metodo_pagamento, vendedor_nome, created_at, cidade_id, produto_id, sabor_id, cidade:cidades(nome), produto:produtos(nome), sabor:sabores(nome)`).order('created_at', { ascending: false })
+      carregarTodasVendas()
     ]);
+
+    const falha = [resEstoque, resCidades, resProdutos, resSabores, resVendas].find(r => r.error);
+    setErroCarga(falha?.error ? falha.error.message : "");
 
     if (resEstoque.data) setEstoque(resEstoque.data);
     if (resCidades.data) setCidadesList(resCidades.data);
@@ -128,20 +148,27 @@ export default function AdminDashboard() {
 
   const salvarNovoEstoque = async () => {
     if (!formEstoque.cidade_id || !formEstoque.produto_id || !formEstoque.sabor_id) return alert("Preencha todos os campos.");
+    if (!Number.isInteger(formEstoque.quantidade) || formEstoque.quantidade < 1) return alert("A quantidade precisa ser um número inteiro maior que zero.");
     setSalvando(true);
-    const existente = estoque.find((item) => item.cidade_id.toString() === formEstoque.cidade_id && item.produto_id.toString() === formEstoque.produto_id && item.sabor_id.toString() === formEstoque.sabor_id);
-    if (existente) {
-      await supabase.from('estoque').update({ quantidade: existente.quantidade + formEstoque.quantidade }).eq('id', existente.id);
-    } else {
-      await supabase.from('estoque').insert([{ cidade_id: parseInt(formEstoque.cidade_id), produto_id: parseInt(formEstoque.produto_id), sabor_id: parseInt(formEstoque.sabor_id), quantidade: formEstoque.quantidade }]);
-    }
-    setSalvando(false); setIsAddEstoqueModalOpen(false); carregarDados(); 
+    // Consulta o banco (e não a lista em memória) para somar em cima do valor atual
+    const { data: existentes, error: errBusca } = await supabase.from('estoque').select('id, quantidade')
+      .eq('cidade_id', parseInt(formEstoque.cidade_id)).eq('produto_id', parseInt(formEstoque.produto_id)).eq('sabor_id', parseInt(formEstoque.sabor_id)).limit(1);
+    const existente = existentes?.[0];
+    const { error } = errBusca
+      ? { error: errBusca }
+      : existente
+        ? await supabase.from('estoque').update({ quantidade: existente.quantidade + formEstoque.quantidade }).eq('id', existente.id)
+        : await supabase.from('estoque').insert([{ cidade_id: parseInt(formEstoque.cidade_id), produto_id: parseInt(formEstoque.produto_id), sabor_id: parseInt(formEstoque.sabor_id), quantidade: formEstoque.quantidade }]);
+    setSalvando(false);
+    if (error) return alert("Erro ao salvar a entrada: " + error.message);
+    setIsAddEstoqueModalOpen(false); carregarDados();
   };
 
   const salvarNovoProduto = async () => {
     if (!formProduto.nome || !formProduto.preco) return alert("Nome e Preço são obrigatórios.");
+    const precoFormatado = parsePreco(formProduto.preco);
+    if (precoFormatado === null) return alert("Preço inválido. Use o formato 85,00.");
     setSalvando(true);
-    const precoFormatado = parseFloat(formProduto.preco.replace(',', '.'));
     const { error } = await supabase.from('produtos').insert([{ nome: formProduto.nome, descricao: formProduto.descricao, preco: precoFormatado }]);
     if (!error) { setIsAddProdutoModalOpen(false); setFormProduto({nome: '', descricao: '', preco: ''}); carregarDados(); } else alert("Erro: " + error.message);
     setSalvando(false);
@@ -150,8 +177,9 @@ export default function AdminDashboard() {
   // 🚀 NOVO: Salvar a edição do PRODUTO (Valor, Nome, etc)
   const salvarEdicaoProduto = async () => {
     if (!editFormProduto.nome || !editFormProduto.preco) return alert("Nome e Preço são obrigatórios.");
+    const precoFormatado = parsePreco(editFormProduto.preco);
+    if (precoFormatado === null) return alert("Preço inválido. Use o formato 85,00.");
     setSalvando(true);
-    const precoFormatado = parseFloat(String(editFormProduto.preco).replace(',', '.'));
     const { error } = await supabase.from('produtos').update({
       nome: editFormProduto.nome,
       descricao: editFormProduto.descricao,
@@ -217,7 +245,8 @@ export default function AdminDashboard() {
   const excluirItemEstoque = async (id: number) => {
     if (!confirm("Tem certeza que deseja apagar este registro de estoque completamente?")) return;
     setLoading(true);
-    await supabase.from('estoque').delete().eq('id', id);
+    const { error } = await supabase.from('estoque').delete().eq('id', id);
+    if (error) alert("Erro ao apagar o registro: " + error.message);
     setIsEditModalOpen(false);
     carregarDados();
   };
@@ -233,15 +262,15 @@ export default function AdminDashboard() {
   const excluirSabor = async (id: number) => {
     if (!confirm("⚠️ PERIGO: Tem certeza que deseja apagar este sabor DEFINITIVAMENTE do sistema? Todo o estoque dele também será apagado!")) return;
     setLoading(true);
-    await supabase.from('estoque').delete().eq('sabor_id', id);
-    const { error } = await supabase.from('sabores').delete().eq('id', id);
+    const { error: errEstoque } = await supabase.from('estoque').delete().eq('sabor_id', id);
+    const { error } = errEstoque ? { error: errEstoque } : await supabase.from('sabores').delete().eq('id', id);
     if (error) alert("Não foi possível excluir. Provavelmente existem VENDAS antigas com este sabor.\n\nDetalhes: " + error.message);
     setIsEditModalOpen(false);
     carregarDados();
   };
 
   const excluirVenda = async (venda: any) => {
-    if (!confirm("Excluir esta venda e DEVOLVER o pod ao estoque?")) return;
+    if (!confirm(`Excluir esta venda e DEVOLVER ${venda.quantidade} un. ao estoque?`)) return;
     setLoading(true);
     
     // 1. Deleta a venda
@@ -249,17 +278,21 @@ export default function AdminDashboard() {
     
     if (!errVenda) {
       // 2. Devolve ao estoque
-      const { data: estq } = await supabase.from('estoque')
+      const { data: estqs, error: errBusca } = await supabase.from('estoque')
         .select('id, quantidade')
         .eq('cidade_id', venda.cidade_id)
         .eq('produto_id', venda.produto_id)
         .eq('sabor_id', venda.sabor_id)
-        .single();
-      
-      if (estq) {
-        await supabase.from('estoque').update({ quantidade: estq.quantidade + 1 }).eq('id', estq.id);
-      } else {
-        await supabase.from('estoque').insert([{ cidade_id: venda.cidade_id, produto_id: venda.produto_id, sabor_id: venda.sabor_id, quantidade: 1 }]);
+        .limit(1);
+      const estq = estqs?.[0];
+
+      const { error: errDevolucao } = errBusca
+        ? { error: errBusca }
+        : estq
+          ? await supabase.from('estoque').update({ quantidade: estq.quantidade + venda.quantidade }).eq('id', estq.id)
+          : await supabase.from('estoque').insert([{ cidade_id: venda.cidade_id, produto_id: venda.produto_id, sabor_id: venda.sabor_id, quantidade: venda.quantidade }]);
+      if (errDevolucao) {
+        alert(`A venda foi excluída, mas a devolução ao estoque falhou. Ajuste manualmente: +${venda.quantidade} un. de ${venda.produto?.nome} / ${venda.sabor?.nome} em ${venda.cidade?.nome}.\n\nDetalhes: ${errDevolucao.message}`);
       }
     } else {
       alert("Erro ao excluir venda: " + errVenda.message);
@@ -292,11 +325,13 @@ export default function AdminDashboard() {
         if (txt.includes('✅')) {
           const partes = txt.split('✅'); 
           produtoAtualNome = partes[0].trim();
-          const precoMatch = txt.match(/R\$\s*:\s*([\d,]+)/i) || txt.match(/R\$\s*([\d,]+)/i) || txt.match(/([\d,]+)/);
-          const precoAtual = precoMatch ? parseFloat(precoMatch[1].replace(',', '.')) : 0;
+          // Preço: primeiro "R$ 85,00"; senão, o primeiro número depois do ✅ (nunca o número do nome, ex: "V80")
+          const precoMatch = txt.match(/R\$\s*:?\s*([\d.,]+)/i) || partes.slice(1).join(' ').match(/(\d[\d.,]*)/);
+          const precoAtual = (precoMatch && parsePreco(precoMatch[1])) || 0;
+          if (!produtoAtualNome) { produtoAtualId = null; addLog(`⚠️ Linha ignorada (marca sem nome): ${txt}`); continue; }
           addLog(`📦 Marca: ${produtoAtualNome}`);
           
-          const { data: pData, error: errBuscaP } = await supabase.from('produtos').select('id').ilike('nome', produtoAtualNome).limit(1);
+          const { data: pData, error: errBuscaP } = await supabase.from('produtos').select('id').ilike('nome', escapeLike(produtoAtualNome)).limit(1);
           if (errBuscaP) throw errBuscaP;
 
           if (pData && pData.length > 0) { 
@@ -315,7 +350,7 @@ export default function AdminDashboard() {
           const saborNome = matchSabor[2].trim(); 
           let saborId = null;
           
-          const { data: sData, error: errBuscaS } = await supabase.from('sabores').select('id').eq('produto_id', produtoAtualId).ilike('nome', saborNome).limit(1);
+          const { data: sData, error: errBuscaS } = await supabase.from('sabores').select('id').eq('produto_id', produtoAtualId).ilike('nome', escapeLike(saborNome)).limit(1);
           if (errBuscaS) throw errBuscaS;
 
           if (sData && sData.length > 0) { 
@@ -405,11 +440,11 @@ export default function AdminDashboard() {
   // ==========================================
   // RENDERIZAÇÃO
   // ==========================================
-  if (verificandoSessao) return <div className="min-h-screen bg-[#030303] flex items-center justify-center"><div className="w-12 h-12 border-4 border-pink-500/20 border-t-pink-500 rounded-full animate-spin" /></div>;
+  if (verificandoSessao) return <div className="min-h-screen bg-surface flex items-center justify-center"><div className="w-12 h-12 border-4 border-pink-500/20 border-t-pink-500 rounded-full animate-spin" /></div>;
 
   if (!isAutenticado) {
     return (
-      <div className="min-h-screen bg-[#030303] flex items-center justify-center p-6 selection:bg-pink-500 relative overflow-hidden">
+      <div className="min-h-screen bg-surface flex items-center justify-center p-6 selection:bg-pink-500 relative overflow-hidden">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[400px] bg-pink-600/10 blur-[120px] rounded-full pointer-events-none" />
         <div className="bg-zinc-900/40 border border-white/5 p-8 sm:p-10 rounded-[2rem] w-full max-w-md shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-700 relative z-10">
           <div className="text-center mb-10">
@@ -427,8 +462,8 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-[#030303] text-zinc-100 selection:bg-pink-500 pb-24 font-sans">
-      <header className="sticky top-0 z-40 bg-[#030303]/80 backdrop-blur-xl border-b border-white/5 shadow-sm">
+    <div className="min-h-screen bg-surface text-zinc-100 selection:bg-pink-500 pb-24 font-sans">
+      <header className="sticky top-0 z-40 bg-surface/80 backdrop-blur-xl border-b border-white/5 shadow-sm">
         <div className="max-w-6xl mx-auto px-4 sm:px-8 py-4 flex justify-between items-center">
           <div className="flex flex-col"><h1 className="text-xl sm:text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-rose-400 tracking-tight uppercase">Dashboard</h1><span className="text-[9px] sm:text-xs text-zinc-500 font-bold uppercase tracking-widest mt-0.5">Control Center</span></div>
           <div className="flex items-center gap-2 sm:gap-4"><Link href="/" target="_blank" className="hidden sm:flex px-5 py-2.5 text-xs bg-zinc-900 border border-white/5 hover:border-pink-500/50 rounded-xl transition-all font-bold">Ver Loja</Link><button onClick={handleLogout} className="p-2.5 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-all active:scale-95"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg></button></div>
@@ -454,6 +489,12 @@ export default function AdminDashboard() {
           <div className="flex flex-col items-center justify-center py-20 gap-4"><div className="w-8 h-8 border-4 border-pink-500/20 border-t-pink-500 rounded-full animate-spin" /><span className="text-zinc-500 text-xs font-bold uppercase tracking-widest">Sincronizando...</span></div>
         ) : (
           <>
+            {erroCarga && (
+              <div role="alert" className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-300 text-sm flex flex-wrap items-center justify-between gap-3">
+                <span>Parte dos dados não carregou e pode estar desatualizada. ({erroCarga})</span>
+                <button onClick={carregarDados} className="px-4 py-2 bg-red-500 hover:bg-red-400 text-white rounded-xl text-xs font-bold">Tentar novamente</button>
+              </div>
+            )}
             {/* ========================================== */}
             {/* ABA 0: CAIXA E VENDAS */}
             {/* ========================================== */}
@@ -484,7 +525,7 @@ export default function AdminDashboard() {
                   <div className="bg-gradient-to-br from-pink-600/20 to-rose-600/5 border border-pink-500/30 rounded-3xl p-6 sm:p-8 relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-32 h-32 bg-pink-500/20 blur-3xl rounded-full" />
                     <h3 className="text-pink-400 text-xs font-black uppercase tracking-widest mb-2 relative z-10">Faturamento Filtrado</h3>
-                    <p className="text-4xl sm:text-5xl font-black text-white relative z-10">R$ {totalFaturamento.toFixed(2).replace('.', ',')}</p>
+                    <p className="text-4xl sm:text-5xl font-black text-white relative z-10">{formatBRL(totalFaturamento)}</p>
                   </div>
                   <div className="bg-zinc-900/40 border border-white/5 rounded-3xl p-6 sm:p-8 relative overflow-hidden">
                     <h3 className="text-zinc-400 text-xs font-black uppercase tracking-widest mb-2">Pods Vendidos (Filtro)</h3>
@@ -515,14 +556,14 @@ export default function AdminDashboard() {
                             <tr key={venda.id} className="hover:bg-zinc-800/40 group">
                               <td className="px-6 py-4 text-xs text-zinc-500">{new Date(venda.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</td>
                               <td className="px-6 py-4 font-bold text-white"><span className="bg-white/10 px-2.5 py-1 rounded-md text-xs">{venda.vendedor_nome}</span></td>
-                              <td className="px-6 py-4"><p className="font-black text-white text-sm">{venda.produto?.nome}</p><p className="text-xs text-zinc-400">{venda.sabor?.nome}</p></td>
+                              <td className="px-6 py-4"><p className="font-black text-white text-sm">{venda.produto?.nome}</p><p className="text-xs text-zinc-400">{venda.quantidade}× {venda.sabor?.nome}</p></td>
                               <td className="px-6 py-4 text-zinc-300 font-medium">{venda.cidade?.nome}</td>
                               <td className="px-6 py-4">
                                 <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider
-                                  ${venda.metodo_pagamento === 'Pix' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : venda.metodo_pagamento === 'Cartão' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-green-500/20 text-green-400 border border-green-500/30'}`}
+                                  ${venda.metodo_pagamento?.startsWith('Pix') ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' : venda.metodo_pagamento?.startsWith('Cartão') ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : venda.metodo_pagamento?.startsWith('Div') ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-green-500/20 text-green-400 border border-green-500/30'}`}
                                 >{venda.metodo_pagamento}</span>
                               </td>
-                              <td className="px-6 py-4 text-right font-black text-pink-500">R$ {venda.valor_total.toFixed(2).replace('.', ',')}</td>
+                              <td className="px-6 py-4 text-right font-black text-pink-500">{formatBRL(venda.valor_total * venda.quantidade)}</td>
                               <td className="px-6 py-4 text-center flex items-center justify-center gap-2">
                                 <button onClick={() => { setVendaEditando(venda); setNovoMetodoPagamento(venda.metodo_pagamento); setIsEditVendaModalOpen(true); }} className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors" title="Editar Pagamento">
                                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
@@ -662,13 +703,13 @@ export default function AdminDashboard() {
                           </td>
                           <td className="px-6 py-5 font-black text-white">{p.nome}</td>
                           <td className="px-6 py-5 text-zinc-400 text-xs truncate max-w-[150px]">{p.descricao || 'Sem descrição'}</td>
-                          <td className="px-6 py-5 text-pink-400 font-bold text-right">R$ {p.preco.toFixed(2)}</td>
+                          <td className="px-6 py-5 text-pink-400 font-bold text-right">{formatBRL(p.preco)}</td>
                           <td className="px-6 py-5 text-center flex items-center justify-center gap-2">
                             {/* 🚀 BOTÃO EDITAR PRODUTO */}
                             <button 
                               onClick={() => {
                                 setProdutoEditando(p);
-                                setEditFormProduto({ nome: p.nome, descricao: p.descricao || '', preco: p.preco.toFixed(2) });
+                                setEditFormProduto({ nome: p.nome, descricao: p.descricao || '', preco: (Number(p.preco) || 0).toFixed(2).replace('.', ',') });
                                 setIsEditProdutoModalOpen(true);
                               }} 
                               className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors" 
@@ -738,7 +779,7 @@ export default function AdminDashboard() {
                 <div className="flex items-center justify-center gap-4">
                   <button onClick={() => setNovaQuantidade(Math.max(0, novaQuantidade - 1))} className="w-12 h-12 rounded-full bg-zinc-800 hover:bg-pink-600 text-2xl font-black text-white flex items-center justify-center active:scale-90 transition-all">-</button>
                   <div className="relative flex flex-col items-center justify-center">
-                    <input type="number" value={novaQuantidade} onChange={(e) => setNovaQuantidade(parseInt(e.target.value) || 0)} className="w-20 bg-transparent text-center text-5xl font-black text-white focus:outline-none focus:text-pink-500 transition-colors p-0 m-0" style={{ WebkitAppearance: 'none', margin: 0 }} />
+                    <input type="number" value={novaQuantidade} onChange={(e) => setNovaQuantidade(Math.max(0, parseInt(e.target.value) || 0))} className="w-20 bg-transparent text-center text-5xl font-black text-white focus:outline-none focus:text-pink-500 transition-colors p-0 m-0" style={{ WebkitAppearance: 'none', margin: 0 }} />
                   </div>
                   <button onClick={() => setNovaQuantidade(novaQuantidade + 1)} className="w-12 h-12 rounded-full bg-zinc-800 hover:bg-pink-600 text-2xl font-black text-white flex items-center justify-center active:scale-90 transition-all">+</button>
                 </div>
@@ -779,6 +820,10 @@ export default function AdminDashboard() {
             </div>
             <div className="space-y-4">
               <select className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={novoMetodoPagamento} onChange={(e) => setNovoMetodoPagamento(e.target.value)}>
+                {/* Mantém o registro original (ex: pagamento dividido ou com desconto) como opção, para não ser sobrescrito sem querer */}
+                {vendaEditando && !['Pix', 'Cartão', 'Dinheiro'].includes(vendaEditando.metodo_pagamento) && (
+                  <option value={vendaEditando.metodo_pagamento}>{vendaEditando.metodo_pagamento}</option>
+                )}
                 <option value="Pix">Pix</option>
                 <option value="Cartão">Cartão (Débito/Crédito)</option>
                 <option value="Dinheiro">Dinheiro</option>
@@ -841,7 +886,7 @@ export default function AdminDashboard() {
               <select className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formEstoque.cidade_id} onChange={(e) => setFormEstoque({...formEstoque, cidade_id: e.target.value})}><option value="">Selecione a Cidade</option>{cidadesList.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}</select>
               <select className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formEstoque.produto_id} onChange={(e) => setFormEstoque({...formEstoque, produto_id: e.target.value})}><option value="">Selecione o Produto</option>{produtosList.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}</select>
               <select className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formEstoque.sabor_id} onChange={(e) => setFormEstoque({...formEstoque, sabor_id: e.target.value})}><option value="">Selecione o Sabor</option>{saboresList.filter(s => s.produto_id.toString() === formEstoque.produto_id).map(s => <option key={s.id} value={s.id}>{s.nome}</option>)}</select>
-              <input type="number" placeholder="Quantidade" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formEstoque.quantidade} onChange={(e) => setFormEstoque({...formEstoque, quantidade: parseInt(e.target.value)})} />
+              <input type="number" min="1" aria-label="Quantidade" placeholder="Quantidade" className="w-full bg-zinc-900 border border-white/10 rounded-xl h-12 px-4 text-sm text-white outline-none focus:border-pink-500" value={formEstoque.quantidade} onChange={(e) => setFormEstoque({...formEstoque, quantidade: parseInt(e.target.value) || 0})} />
             </div>
             <div className="flex gap-3"><button onClick={() => setIsAddEstoqueModalOpen(false)} className="flex-1 py-3 rounded-xl bg-zinc-800 text-white font-bold text-sm">Cancelar</button><button onClick={salvarNovoEstoque} disabled={salvando} className="flex-1 py-3 rounded-xl bg-pink-600 text-white font-bold text-sm">{salvando ? '...' : 'Salvar'}</button></div>
           </div>

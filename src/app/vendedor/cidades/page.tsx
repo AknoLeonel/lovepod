@@ -9,6 +9,7 @@ export default function VendedorCidades() {
   const [cidades, setCidades] = useState<any[]>([]);
   const [vendedorNome, setVendedorNome] = useState("");
   const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -25,7 +26,8 @@ export default function VendedorCidades() {
 
     // 2. Puxa as cidades do banco
     async function carregarCidades() {
-      const { data } = await supabase.from('cidades').select('*').order('nome');
+      const { data, error } = await supabase.from("cidades").select("*").order("nome");
+      setErro(!!error);
       if (data) setCidades(data);
       setLoading(false);
     }
@@ -41,14 +43,14 @@ export default function VendedorCidades() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#030303] flex items-center justify-center">
+      <div className="min-h-screen bg-surface flex items-center justify-center">
         <div className="w-12 h-12 border-4 border-pink-500/20 border-t-pink-500 rounded-full animate-spin" />
       </div>
     );
   }
 
   return (
-    <main className="min-h-screen bg-[#030303] text-zinc-100 p-6 sm:p-12 selection:bg-pink-500 relative overflow-hidden">
+    <main className="min-h-screen bg-surface text-zinc-100 p-6 sm:p-12 selection:bg-pink-500 relative overflow-hidden">
       
       {/* Luz de fundo */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-pink-600/10 blur-[120px] rounded-full pointer-events-none" />
@@ -79,11 +81,13 @@ export default function VendedorCidades() {
 
         {/* Lista de Cidades */}
         <nav className="w-full flex flex-col gap-4">
+          {erro && <p role="alert" className="p-5 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-300 text-sm text-center">Não foi possível carregar as cidades. Recarregue a página.</p>}
+          {!erro && cidades.length === 0 && <p className="p-5 bg-zinc-900/40 border border-zinc-800 rounded-2xl text-zinc-400 text-sm text-center">Nenhuma cidade cadastrada.</p>}
           {cidades.map((cidade, index) => (
             <Link 
               key={cidade.id} 
               href={`/vendedor/vender/${cidade.id}`}
-              className="w-full flex items-center justify-between px-6 py-6 bg-zinc-900/40 border border-white/5 hover:border-pink-500/50 rounded-[2rem] transition-all duration-300 active:scale-95 group animate-in fade-in slide-in-from-bottom-8"
+              className="w-full flex items-center justify-between px-6 py-6 bg-zinc-900/40 border border-white/5 hover:border-pink-500/50 rounded-[2rem] transition-all duration-300 active:scale-95 group animate-fade-in-up"
               style={{ animationDelay: `${index * 100}ms` }}
             >
               <span className="text-xl font-bold text-zinc-300 group-hover:text-white transition-colors tracking-wide">{cidade.nome}</span>

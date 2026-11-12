@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -24,7 +24,7 @@ export default function VendedorLogin() {
     if (senha === SENHA_VENDEDOR) {
       // Salva a sessão do vendedor
       sessionStorage.setItem('lovepod_vendedor_auth', 'true');
-      sessionStorage.setItem('lovepod_vendedor_nome', nome);
+      sessionStorage.setItem('lovepod_vendedor_nome', nome.trim());
       
       router.push('/vendedor/cidades'); // Próximo passo: escolher a cidade
     } else {
@@ -34,7 +34,7 @@ export default function VendedorLogin() {
   };
 
   return (
-    <div className="min-h-screen bg-[#030303] flex items-center justify-center p-6 relative overflow-hidden">
+    <div className="min-h-screen bg-surface flex items-center justify-center p-6 relative overflow-hidden">
       {/* Efeito de fundo */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-pink-600/10 blur-[120px] rounded-full pointer-events-none" />
 
@@ -44,14 +44,16 @@ export default function VendedorLogin() {
              <Image src="/logolove.png" alt="Logo" fill className="object-contain" />
           </div>
           <h1 className="text-xl font-black text-white uppercase tracking-widest">Acesso Vendedor</h1>
-          <p className="text-zinc-500 text-[10px] uppercase tracking-[0.3em] mt-2 font-bold text-pink-500">Área de Vendas</p>
+          <p className="text-[10px] uppercase tracking-[0.3em] mt-2 font-bold text-pink-500">Área de Vendas</p>
         </div>
 
         <form onSubmit={handleLogin} className="space-y-4">
           <div className="space-y-2">
-            <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-2">Seu Nome</label>
+            <label htmlFor="vendedor-nome" className="text-[11px] uppercase tracking-widest text-zinc-400 font-bold ml-2">Seu Nome</label>
             <input 
               type="text" 
+              id="vendedor-nome"
+              autoComplete="name"
               placeholder="Ex: João Silva" 
               value={nome} 
               onChange={(e) => setNome(e.target.value)}
@@ -60,9 +62,11 @@ export default function VendedorLogin() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-[10px] uppercase tracking-widest text-zinc-500 font-bold ml-2">Chave de Acesso</label>
+            <label htmlFor="vendedor-senha" className="text-[11px] uppercase tracking-widest text-zinc-400 font-bold ml-2">Chave de Acesso</label>
             <input 
               type="password" 
+              id="vendedor-senha"
+              autoComplete="current-password"
               placeholder="••••••••" 
               value={senha} 
               onChange={(e) => setSenha(e.target.value)}
@@ -70,7 +74,7 @@ export default function VendedorLogin() {
             />
           </div>
 
-          {erro && <p className="text-red-500 text-xs font-bold text-center animate-bounce">{erro}</p>}
+          {erro && <p role="alert" className="text-red-400 text-sm font-bold text-center">{erro}</p>}
 
           <button 
             type="submit" 
@@ -79,7 +83,7 @@ export default function VendedorLogin() {
             Entrar no Sistema
           </button>
           
-          <Link href="/" className="block text-center text-zinc-600 hover:text-zinc-400 text-[10px] uppercase font-bold transition-colors pt-4">
+          <Link href="/" className="block text-center text-zinc-400 hover:text-white text-xs uppercase font-bold transition-colors pt-4">
             Voltar para o site público
           </Link>
         </form>
